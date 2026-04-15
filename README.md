@@ -116,6 +116,29 @@ What to expect: Creates one agent config but three different environments (Pytho
 
 Proves: Environment reuse, agent config reuse, different container setups.
 
+**Example 09: Chat Agent (Next.js)**
+```bash
+cd examples/09-chat-agent
+npm install
+npm run dev
+# Open http://localhost:3000
+```
+What to expect: A full chat interface in your browser. Dark theme with gold accents. Type a message, Claude responds. Conversations persist across page refreshes using SQLite session mapping.
+
+First message takes 30-60 seconds (provisioning the container). Subsequent messages are faster.
+
+There's also a Python/Flask version:
+```bash
+cd examples/09-chat-agent
+pip install -r requirements.txt
+python server.py
+# Open http://localhost:3000
+```
+
+Proves: Multi-turn conversations, session reuse, real product pattern (replaces n8n's 10-node workflow with one app).
+
+---
+
 ### Routines Examples
 
 **Example 06: Scheduled Routine**
@@ -170,6 +193,7 @@ If you run all examples, here's what you've covered from the video:
 | Managed Agents: Architecture | Example 01 demonstrates brain/hands/session in action |
 | Managed Agents: Code walkthrough | Examples 01-05 cover every API pattern |
 | Managed Agents: Multi-environment | Example 05 |
+| Managed Agents: Chat product | Example 09 (Next.js chat agent with session persistence) |
 | When to use what | Example 04 comments explain routines vs crons vs trigger.dev |
 
 The only thing NOT covered by the starter kit is the Console UI walkthrough (screen-record the wizard at platform.claude.com) and the Ultraplan demo (run `/ultraplan` in Claude Code CLI).
