@@ -47,6 +47,18 @@ export function getDb(): Database.Database {
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS routines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        routine_id TEXT NOT NULL,
+        token TEXT NOT NULL,
+        description TEXT,
+        trigger_type TEXT DEFAULT 'api',
+        last_fired_at TEXT,
+        last_session_url TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
     `);
   }
   return db;
@@ -175,6 +187,115 @@ export function updateTask(
 export function deleteTask(id: number): boolean {
   const result = getDb()
     .prepare("DELETE FROM board_tasks WHERE id = ?")
+    .run(id);
+  return result.changes > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Routine helpers
+// ---------------------------------------------------------------------------
+
+export interface Routine {
+  id: number;
+  name: string;
+  routine_id: string;
+  token: string;
+  description: string | null;
+  trigger_type: string;
+  last_fired_at: string | null;
+  last_session_url: string | null;
+  created_at: string;
+}
+
+/**
+ * Return all routines, ordered newest first.
+ */
+export function getRoutines(): Routine[] {
+  return getDb()
+    .prepare("SELECT * FROM routines ORDER BY created_at DESC")
+    .all() as Routine[];
+}
+
+/**
+ * Get a single routine by ID.
+ */
+export function getRoutine(id: number): Routine | undefined {
+  return getDb()
+    .prepare("SELECT * FROM routines WHERE id = ?")
+    .get(id) as Routine | undefined;
+}
+
+/**
+ * Create a new routine and return it.
+ */
+export function createRoutine(routine: {
+  name: string;
+  routine_id: string;
+  token: string;
+  description?: string;
+  trigger_type?: string;
+}): Routine {
+  const stmt = getDb().prepare(
+    `INSERT INTO routines (name, routine_id, token, description, trigger_type)
+     VALUES (@name, @routine_id, @token, @description, @trigger_type)`
+  );
+  const info = stmt.run({
+    name: routine.name,
+    routine_id: routine.routine_id,
+    token: routine.token,
+    description: routine.description ?? null,
+    trigger_type: routine.trigger_type ?? "api",
+  });
+  return getRoutine(info.lastInsertRowid as number)!;
+}
+
+/**
+ * Update a routine.
+ */
+export function updateRoutine(
+  id: number,
+  updates: Partial<Pick<Routine, "name" | "routine_id" | "token" | "description" | "trigger_type">>
+): Routine | undefined {
+  const fields: string[] = [];
+  const values: Record<string, unknown> = { id };
+
+  for (const key of ["name", "routine_id", "token", "description", "trigger_type"] as const) {
+    if (updates[key] !== undefined) {
+      fields.push(`${key} = @${key}`);
+      values[key] = updates[key];
+    }
+  }
+
+  if (fields.length === 0) return getRoutine(id);
+
+  getDb()
+    .prepare(`UPDATE routines SET ${fields.join(", ")} WHERE id = @id`)
+    .run(values);
+
+  return getRoutine(id);
+}
+
+/**
+ * Update last fired metadata for a routine.
+ */
+export function updateRoutineLastFired(
+  id: number,
+  lastFiredAt: string,
+  lastSessionUrl: string
+): void {
+  getDb()
+    .prepare(
+      "UPDATE routines SET last_fired_at = @last_fired_at, last_session_url = @last_session_url WHERE id = @id"
+    )
+    .run({ id, last_fired_at: lastFiredAt, last_session_url: lastSessionUrl });
+}
+
+/**
+ * Delete a routine by ID. Returns true if a row was removed.
+ */
+export function deleteRoutine(id: number): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM routines WHERE id = ?")
     .run(id);
   return result.changes > 0;
 }

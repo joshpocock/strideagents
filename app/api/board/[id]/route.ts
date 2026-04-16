@@ -58,8 +58,7 @@ export async function PATCH(
 
       // Send the task description as the first message (fire and forget).
       // The frontend will stream results via /api/board/:id/stream.
-      client.beta.sessions
-        .turn(session.id, {
+      (client.beta.sessions as any).turn(session.id, {
           messages: [
             {
               role: "user",
@@ -67,7 +66,7 @@ export async function PATCH(
             },
           ],
         })
-        .then((response) => {
+        .then((response: any) => {
           // Extract the text result from the response
           let resultText = "";
           const resp = response as { content?: Array<{ type: string; text?: string }> };

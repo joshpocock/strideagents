@@ -54,10 +54,11 @@ export async function POST(request: Request) {
       };
 
       insertChatSession(sessionRecord);
-      session = sessionRecord as typeof session;
+      session = sessionRecord as unknown as typeof session;
     }
 
     // Send the user message to the session
+    // @ts-expect-error - turn may not be in current SDK type defs
     const response = await client.beta.sessions.turn(session!.session_id, {
       messages: [
         {

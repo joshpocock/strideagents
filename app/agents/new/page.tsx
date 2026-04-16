@@ -33,19 +33,7 @@ export default function NewAgentPage() {
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <h1
-        style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}
-      >
-        Create Agent
-      </h1>
-      <div
-        style={{
-          background: "#1a1a1a",
-          border: "1px solid #2a2a2a",
-          borderRadius: 8,
-          padding: 24,
-        }}
-      >
+      <div className="card">
         <AgentForm onSubmit={handleSubmit} submitLabel="Create Agent" />
       </div>
     </div>

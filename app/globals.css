@@ -1,5 +1,75 @@
 /* ------------------------------------------------------------------ */
-/* CSS Reset and Dark Theme Defaults                                  */
+/* CSS Variables - Dark Theme (default)                                */
+/* ------------------------------------------------------------------ */
+
+:root {
+  --bg-primary: #000000;
+  --bg-sidebar: #0A0A0A;
+  --bg-secondary: #0a0a0a;
+  --bg-card: #111111;
+  --bg-card-hover: #1A1A1A;
+  --bg-card-border: #2A2A2A;
+  --bg-input: #1A1A1A;
+  --bg-hover: #222222;
+  --bg-badge: #222222;
+  --text-primary: #FFFFFF;
+  --text-secondary: #888888;
+  --text-muted: #555555;
+  --text-dim: #555555;
+  --text-faint: #444444;
+  --accent: #BA9926;
+  --accent-hover: #D4AF37;
+  --accent-muted: #7a6518;
+  --accent-bg: rgba(186, 153, 38, 0.08);
+  --accent-subtle: rgba(186, 153, 38, 0.1);
+  --success: #22C55E;
+  --error: #EF4444;
+  --warning: #F59E0B;
+  --border-color: #2A2A2A;
+  --border-subtle: #1a1a1a;
+  --border-dashed: #333333;
+  --sidebar-bg: #0a0a0a;
+  --sidebar-border: #2a2a2a;
+  --modal-overlay: rgba(0, 0, 0, 0.7);
+}
+
+/* ------------------------------------------------------------------ */
+/* Light Theme Overrides                                               */
+/* ------------------------------------------------------------------ */
+
+[data-theme="light"] {
+  --bg-primary: #F8F9FA;
+  --bg-sidebar: #FFFFFF;
+  --bg-secondary: #F3F4F6;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F3F4F6;
+  --bg-card-border: #E5E7EB;
+  --bg-input: #F3F4F6;
+  --bg-hover: #E5E7EB;
+  --bg-badge: #E5E7EB;
+  --text-primary: #111827;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --text-dim: #9CA3AF;
+  --text-faint: #D1D5DB;
+  --accent: #BA9926;
+  --accent-hover: #A3861F;
+  --accent-muted: #d4b344;
+  --accent-bg: rgba(186, 153, 38, 0.08);
+  --accent-subtle: rgba(186, 153, 38, 0.08);
+  --success: #16A34A;
+  --error: #DC2626;
+  --warning: #D97706;
+  --border-color: #E5E7EB;
+  --border-subtle: #E5E7EB;
+  --border-dashed: #D1D5DB;
+  --sidebar-bg: #FFFFFF;
+  --sidebar-border: #E5E7EB;
+  --modal-overlay: rgba(0, 0, 0, 0.4);
+}
+
+/* ------------------------------------------------------------------ */
+/* CSS Reset and Theme Defaults                                        */
 /* ------------------------------------------------------------------ */
 
 *,
@@ -10,13 +80,21 @@
   padding: 0;
 }
 
+* {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
 html {
   color-scheme: dark;
 }
 
+[data-theme="light"] {
+  color-scheme: light;
+}
+
 body {
-  background: #000000;
-  color: #ffffff;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
@@ -25,7 +103,7 @@ body {
 }
 
 a {
-  color: #ba9926;
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -40,37 +118,101 @@ a:hover {
 input,
 textarea,
 select {
-  background: #1a1a1a;
-  color: #ffffff;
-  border: 1px solid #2a2a2a;
-  border-radius: 6px;
-  padding: 8px 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
   font-size: 14px;
   font-family: inherit;
   outline: none;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.2s ease;
 }
 
 input:focus,
 textarea:focus,
 select:focus {
-  border-color: #ba9926;
+  border-color: var(--accent);
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: #666666;
+  color: var(--text-muted);
 }
 
 button {
   cursor: pointer;
   font-family: inherit;
   font-size: 14px;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
 }
 
 select option {
-  background: #1a1a1a;
-  color: #ffffff;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Button Styles                                                       */
+/* ------------------------------------------------------------------ */
+
+.btn-primary {
+  background: var(--accent);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  text-decoration: none;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Card Style                                                          */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -78,21 +220,52 @@ select option {
 /* ------------------------------------------------------------------ */
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0a0a0a;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333333;
-  border-radius: 4px;
+  background: var(--border-dashed);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #444444;
+  background: var(--text-muted);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-dashed) transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Skeleton Loading Animation                                          */
+/* ------------------------------------------------------------------ */
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-card) 25%,
+    var(--bg-hover) 50%,
+    var(--bg-card) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -101,7 +274,7 @@ select option {
 
 hr {
   border: none;
-  border-top: 1px solid #2a2a2a;
+  border-top: 1px solid var(--border-color);
   margin: 16px 0;
 }
 
@@ -114,13 +287,96 @@ th,
 td {
   text-align: left;
   padding: 12px 16px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--border-color);
 }
 
 th {
-  color: #a0a0a0;
+  color: var(--text-secondary);
   font-weight: 500;
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toast Animation                                                     */
+/* ------------------------------------------------------------------ */
+
+@keyframes toast-slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes toast-slide-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive Layout                                                   */
+/* ------------------------------------------------------------------ */
+
+.main-content {
+  flex: 1;
+  margin-left: 240px;
+  min-height: 100vh;
+  transition: margin-left 0.25s ease;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+  }
+
+  .topbar {
+    padding-left: 60px !important;
+  }
+
+  .topbar-title {
+    font-size: 14px !important;
+  }
+
+  .board-columns {
+    grid-template-columns: 1fr !important;
+  }
+
+  .preset-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Command Palette Animations                                          */
+/* ------------------------------------------------------------------ */
+
+@keyframes palette-slide-down {
+  from {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes palette-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

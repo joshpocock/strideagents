@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Download, ChevronDown, FileJson, FileText } from "lucide-react";
+import { exportAsJson, exportAsMarkdown } from "@/lib/export";
+import CostTicker from "./CostTicker";
+import { useCostTracker } from "@/lib/useCostTracker";
 
 interface LogEntry {
   type: string;
@@ -11,21 +15,26 @@ interface LogEntry {
 interface SessionEventLogProps {
   streamUrl: string | null;
   compact?: boolean;
+  sessionName?: string;
 }
 
 const typeColors: Record<string, string> = {
-  tool_use: "#ba9926",
-  text_delta: "#ffffff",
-  status: "#66bb6a",
-  error: "#ef5350",
+  tool_use: "var(--accent)",
+  text_delta: "var(--text-primary)",
+  status: "var(--success)",
+  error: "var(--error)",
 };
 
 export default function SessionEventLog({
   streamUrl,
   compact = false,
+  sessionName,
 }: SessionEventLogProps) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const costData = useCostTracker(streamUrl);
 
   useEffect(() => {
     if (!streamUrl) return;
@@ -68,7 +77,6 @@ export default function SessionEventLog({
         };
 
         setEntries((prev) => {
-          // For text deltas, append to last entry if same type
           if (
             type === "text_delta" &&
             prev.length > 0 &&
@@ -103,38 +111,173 @@ export default function SessionEventLog({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entries]);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setExportOpen(false);
+      }
+    };
+    if (exportOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [exportOpen]);
+
   const maxHeight = compact ? 160 : 400;
 
   return (
-    <div
-      style={{
-        background: "#111111",
-        borderRadius: 6,
-        padding: compact ? 8 : 12,
-        maxHeight,
-        overflowY: "auto",
-        fontSize: compact ? 12 : 13,
-        fontFamily: "monospace",
-        lineHeight: 1.6,
-      }}
-    >
-      {entries.length === 0 && (
-        <span style={{ color: "#666" }}>Waiting for events...</span>
+    <div>
+      {/* Cost ticker (full mode) */}
+      {!compact && streamUrl && (
+        <CostTicker
+          inputTokens={costData.inputTokens}
+          outputTokens={costData.outputTokens}
+          model={costData.model}
+          sessionStartTime={costData.sessionStartTime}
+        />
       )}
-      {entries.map((entry, i) => (
-        <div key={i} style={{ marginBottom: 2 }}>
-          {!compact && (
-            <span style={{ color: "#666", marginRight: 8 }}>
-              {entry.timestamp}
-            </span>
+
+      {/* Export controls */}
+      {!compact && entries.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 8,
+            position: "relative",
+          }}
+          ref={dropdownRef}
+        >
+          <button
+            onClick={() => setExportOpen(!exportOpen)}
+            className="btn-secondary"
+            style={{
+              padding: "6px 12px",
+              fontSize: 12,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Download size={14} />
+            Export
+            <ChevronDown size={12} />
+          </button>
+          {exportOpen && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                right: 0,
+                marginTop: 4,
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
+                borderRadius: 8,
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                overflow: "hidden",
+                zIndex: 10,
+                minWidth: 180,
+              }}
+            >
+              <button
+                onClick={() => {
+                  exportAsJson(entries, sessionName);
+                  setExportOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "background 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "var(--bg-hover)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "transparent";
+                }}
+              >
+                <FileJson size={16} color="var(--accent)" />
+                Export as JSON
+              </button>
+              <button
+                onClick={() => {
+                  exportAsMarkdown(entries, sessionName);
+                  setExportOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: "none",
+                  borderTop: "1px solid var(--border-color)",
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "background 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "var(--bg-hover)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background =
+                    "transparent";
+                }}
+              >
+                <FileText size={16} color="var(--accent)" />
+                Export as Markdown
+              </button>
+            </div>
           )}
-          <span style={{ color: typeColors[entry.type] || "#a0a0a0" }}>
-            {entry.type === "tool_use" && !entry.text.startsWith("Using") ? "" : ""}
-            {entry.text}
-          </span>
         </div>
-      ))}
-      <div ref={bottomRef} />
+      )}
+
+      {/* Log entries */}
+      <div
+        style={{
+          background: "var(--bg-input)",
+          borderRadius: 8,
+          padding: compact ? 8 : 12,
+          maxHeight,
+          overflowY: "auto",
+          fontSize: compact ? 12 : 13,
+          fontFamily: "monospace",
+          lineHeight: 1.6,
+        }}
+      >
+        {entries.length === 0 && (
+          <span style={{ color: "var(--text-muted)" }}>Waiting for events...</span>
+        )}
+        {entries.map((entry, i) => (
+          <div key={i} style={{ marginBottom: 2 }}>
+            {!compact && (
+              <span style={{ color: "var(--text-muted)", marginRight: 8 }}>
+                {entry.timestamp}
+              </span>
+            )}
+            <span style={{ color: typeColors[entry.type] || "var(--text-secondary)" }}>
+              {entry.text}
+            </span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

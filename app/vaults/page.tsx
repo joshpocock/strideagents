@@ -1,48 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { Shield, ChevronRight } from "lucide-react";
 import type { Vault, Credential } from "@/lib/types";
 import Modal from "@/components/Modal";
+import LoadingSkeleton from "@/components/LoadingSkeleton";
+import EmptyState from "@/components/EmptyState";
+import SearchBar from "@/components/SearchBar";
 
 interface VaultWithCredentials extends Vault {
   credentials: Credential[];
   expanded: boolean;
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  background: "#111",
-  border: "1px solid #2a2a2a",
-  borderRadius: 6,
-  color: "#fff",
-  fontSize: 14,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: 13,
-  fontWeight: 500,
-  color: "#a0a0a0",
-  marginBottom: 6,
-};
-
 export default function VaultsPage() {
   const [vaults, setVaults] = useState<VaultWithCredentials[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Create vault form
   const [createVaultOpen, setCreateVaultOpen] = useState(false);
   const [vaultName, setVaultName] = useState("");
   const [creatingVault, setCreatingVault] = useState(false);
 
-  // Add credential form
   const [credVaultId, setCredVaultId] = useState<string | null>(null);
   const [credName, setCredName] = useState("");
   const [credType, setCredType] = useState("api_key");
   const [credToken, setCredToken] = useState("");
   const [credMcpUrl, setCredMcpUrl] = useState("");
   const [addingCred, setAddingCred] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredVaults = useMemo(() => {
+    if (!search.trim()) return vaults;
+    const q = search.toLowerCase();
+    return vaults.filter((v) => v.name.toLowerCase().includes(q));
+  }, [vaults, search]);
 
   const fetchVaults = async () => {
     try {
@@ -62,7 +53,6 @@ export default function VaultsPage() {
       );
 
       setVaults((prev) => {
-        // Preserve expanded state
         const expandedMap = new Map(prev.map((v) => [v.id, v.expanded]));
         return withCreds.map((v) => ({
           ...v,
@@ -135,6 +125,14 @@ export default function VaultsPage() {
     }
   };
 
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 13,
+    fontWeight: 500,
+    color: "var(--text-secondary)",
+    marginBottom: 6,
+  };
+
   return (
     <div>
       <div
@@ -143,66 +141,61 @@ export default function VaultsPage() {
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 24,
+          gap: 16,
         }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Vaults</h1>
+        <div style={{ flex: 1, maxWidth: 400 }}>
+          <SearchBar
+            placeholder="Search vaults by name..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
         <button
           onClick={() => setCreateVaultOpen(true)}
-          style={{
-            background: "#ba9926",
-            color: "#000",
-            border: "none",
-            borderRadius: 6,
-            padding: "10px 20px",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
+          className="btn-primary"
         >
           Create Vault
         </button>
       </div>
 
       {loading ? (
-        <p style={{ color: "#a0a0a0" }}>Loading vaults...</p>
-      ) : vaults.length === 0 ? (
-        <div
-          style={{
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            padding: 48,
-            textAlign: "center",
-          }}
-        >
-          <p style={{ color: "#a0a0a0", fontSize: 15, marginBottom: 16 }}>
-            No vaults yet. Create one to securely store credentials for your
-            agents.
-          </p>
-          <button
-            onClick={() => setCreateVaultOpen(true)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#ba9926",
-              fontSize: 14,
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
-            Create Vault
-          </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[1, 2].map((i) => (
+            <div key={i} className="card">
+              <LoadingSkeleton height={20} width="40%" />
+            </div>
+          ))}
         </div>
+      ) : filteredVaults.length === 0 && !search ? (
+        <EmptyState
+          icon={Shield}
+          title="No vaults yet"
+          description="Create one to securely store credentials for your agents."
+          actionLabel="Create Vault"
+          actionHref="#"
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {vaults.map((vault) => (
+          {filteredVaults.length === 0 && search && (
+            <div
+              style={{
+                textAlign: "center",
+                color: "var(--text-muted)",
+                padding: 32,
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
+                borderRadius: 12,
+              }}
+            >
+              No vaults match &quot;{search}&quot;
+            </div>
+          )}
+          {filteredVaults.map((vault) => (
             <div
               key={vault.id}
-              style={{
-                background: "#1a1a1a",
-                border: "1px solid #2a2a2a",
-                borderRadius: 8,
-                overflow: "hidden",
-              }}
+              className="card"
+              style={{ padding: 0, overflow: "hidden" }}
             >
               <div
                 onClick={() => toggleExpand(vault.id)}
@@ -215,26 +208,23 @@ export default function VaultsPage() {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span
+                  <ChevronRight
+                    size={16}
+                    color="var(--accent)"
                     style={{
-                      color: "#ba9926",
-                      fontSize: 16,
                       transform: vault.expanded ? "rotate(90deg)" : "rotate(0)",
                       transition: "transform 0.15s ease",
-                      display: "inline-block",
                     }}
-                  >
-                    &#9654;
-                  </span>
+                  />
                   <span style={{ fontWeight: 600, fontSize: 15 }}>
                     {vault.name}
                   </span>
-                  <span style={{ color: "#666", fontSize: 13 }}>
+                  <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     {vault.credentials.length} credential
                     {vault.credentials.length !== 1 ? "s" : ""}
                   </span>
                 </div>
-                <span style={{ color: "#666", fontSize: 12 }}>
+                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
                   {vault.created_at
                     ? new Date(vault.created_at).toLocaleDateString()
                     : ""}
@@ -244,12 +234,12 @@ export default function VaultsPage() {
               {vault.expanded && (
                 <div
                   style={{
-                    borderTop: "1px solid #222",
+                    borderTop: "1px solid var(--border-color)",
                     padding: "16px 20px",
                   }}
                 >
                   {vault.credentials.length === 0 ? (
-                    <p style={{ color: "#666", fontSize: 13, marginBottom: 12 }}>
+                    <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
                       No credentials in this vault.
                     </p>
                   ) : (
@@ -258,8 +248,8 @@ export default function VaultsPage() {
                         <div
                           key={cred.id}
                           style={{
-                            background: "#111",
-                            borderRadius: 6,
+                            background: "var(--bg-input)",
+                            borderRadius: 8,
                             padding: "12px 16px",
                             marginBottom: 8,
                             display: "flex",
@@ -274,7 +264,7 @@ export default function VaultsPage() {
                             <div
                               style={{
                                 fontSize: 12,
-                                color: "#666",
+                                color: "var(--text-muted)",
                                 marginTop: 2,
                               }}
                             >
@@ -286,7 +276,7 @@ export default function VaultsPage() {
                           <span
                             style={{
                               fontSize: 12,
-                              color: "#444",
+                              color: "var(--text-muted)",
                               fontFamily: "monospace",
                             }}
                           >
@@ -301,14 +291,11 @@ export default function VaultsPage() {
                       e.stopPropagation();
                       setCredVaultId(vault.id);
                     }}
+                    className="btn-secondary"
                     style={{
-                      background: "none",
-                      border: "1px dashed #333",
-                      borderRadius: 6,
-                      color: "#a0a0a0",
                       padding: "8px 16px",
                       fontSize: 13,
-                      cursor: "pointer",
+                      borderStyle: "dashed",
                     }}
                   >
                     + Add Credential
@@ -330,7 +317,7 @@ export default function VaultsPage() {
           <div>
             <label style={labelStyle}>Vault Name</label>
             <input
-              style={inputStyle}
+              style={{ width: "100%" }}
               value={vaultName}
               onChange={(e) => setVaultName(e.target.value)}
               placeholder="e.g. Production Secrets"
@@ -339,16 +326,10 @@ export default function VaultsPage() {
           <button
             onClick={createVault}
             disabled={!vaultName.trim() || creatingVault}
+            className="btn-primary"
             style={{
-              background: "#ba9926",
-              color: "#000",
-              border: "none",
-              borderRadius: 6,
-              padding: "10px 20px",
-              fontSize: 14,
-              fontWeight: 600,
-              opacity: !vaultName.trim() || creatingVault ? 0.5 : 1,
               alignSelf: "flex-end",
+              opacity: !vaultName.trim() || creatingVault ? 0.5 : 1,
             }}
           >
             {creatingVault ? "Creating..." : "Create"}
@@ -366,7 +347,7 @@ export default function VaultsPage() {
           <div>
             <label style={labelStyle}>Display Name</label>
             <input
-              style={inputStyle}
+              style={{ width: "100%" }}
               value={credName}
               onChange={(e) => setCredName(e.target.value)}
               placeholder="e.g. GitHub Token"
@@ -375,7 +356,7 @@ export default function VaultsPage() {
           <div>
             <label style={labelStyle}>Type</label>
             <select
-              style={inputStyle}
+              style={{ width: "100%" }}
               value={credType}
               onChange={(e) => setCredType(e.target.value)}
             >
@@ -388,7 +369,7 @@ export default function VaultsPage() {
           <div>
             <label style={labelStyle}>Token / Secret</label>
             <input
-              style={inputStyle}
+              style={{ width: "100%" }}
               type="password"
               value={credToken}
               onChange={(e) => setCredToken(e.target.value)}
@@ -398,7 +379,7 @@ export default function VaultsPage() {
           <div>
             <label style={labelStyle}>MCP Server URL (optional)</label>
             <input
-              style={inputStyle}
+              style={{ width: "100%" }}
               value={credMcpUrl}
               onChange={(e) => setCredMcpUrl(e.target.value)}
               placeholder="https://mcp-server.example.com"
@@ -407,16 +388,10 @@ export default function VaultsPage() {
           <button
             onClick={addCredential}
             disabled={!credName.trim() || addingCred}
+            className="btn-primary"
             style={{
-              background: "#ba9926",
-              color: "#000",
-              border: "none",
-              borderRadius: 6,
-              padding: "10px 20px",
-              fontSize: 14,
-              fontWeight: 600,
-              opacity: !credName.trim() || addingCred ? 0.5 : 1,
               alignSelf: "flex-end",
+              opacity: !credName.trim() || addingCred ? 0.5 : 1,
             }}
           >
             {addingCred ? "Adding..." : "Add Credential"}

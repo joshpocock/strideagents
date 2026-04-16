@@ -58,8 +58,8 @@ export async function GET(
         });
 
         // Stream session events using the SDK or polling fallback
-        if (typeof client.beta.sessions.stream === "function") {
-          const eventStream = client.beta.sessions.stream(sessionId);
+        if (typeof (client.beta.sessions as any).stream === "function") {
+          const eventStream = (client.beta.sessions as any).stream(sessionId);
 
           for await (const event of eventStream) {
             sendEvent(event.type || "message", event);
@@ -80,10 +80,11 @@ export async function GET(
                 listParams.after = lastEventId;
               }
 
+              // @ts-expect-error - list_events may not be in current SDK type defs
               const events = await client.beta.sessions.list_events(sessionId, listParams);
               const eventList = Array.isArray(events)
                 ? events
-                : (events as { data?: unknown[] }).data || [];
+                : (events as unknown as { data?: unknown[] }).data || [];
 
               for (const event of eventList as Array<{
                 id?: string;

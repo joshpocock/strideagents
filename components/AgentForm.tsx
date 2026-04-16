@@ -1,7 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Plus, Trash2, Sparkles } from "lucide-react";
 import type { Agent, McpServer } from "@/lib/types";
+
+interface SkillOption {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+}
 
 interface AgentFormProps {
   initialData?: Partial<Agent>;
@@ -28,21 +36,11 @@ const toolsets = [
   { value: "agent_toolset_20260401", label: "Agent Toolset (2026-04-01)" },
 ];
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  background: "#111",
-  border: "1px solid #2a2a2a",
-  borderRadius: 6,
-  color: "#fff",
-  fontSize: 14,
-};
-
 const labelStyle: React.CSSProperties = {
   display: "block",
   fontSize: 13,
   fontWeight: 500,
-  color: "#a0a0a0",
+  color: "var(--text-secondary)",
   marginBottom: 6,
 };
 
@@ -64,6 +62,40 @@ export default function AgentForm({
     initialData?.mcp_servers || []
   );
   const [submitting, setSubmitting] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<SkillOption[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function fetchSkills() {
+      try {
+        const res = await fetch("/api/skills");
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableSkills(
+            Array.isArray(data)
+              ? data.map((s: SkillOption) => ({
+                  id: s.id,
+                  name: s.name,
+                  description: s.description,
+                  source: s.source,
+                }))
+              : []
+          );
+        }
+      } catch {
+        // Skills API may not be available
+      }
+    }
+    fetchSkills();
+  }, []);
+
+  const handleSkillToggle = (skillId: string) => {
+    setSelectedSkills((prev) =>
+      prev.includes(skillId)
+        ? prev.filter((id) => id !== skillId)
+        : [...prev, skillId]
+    );
+  };
 
   const handleToolToggle = (tool: string) => {
     setSelectedTools((prev) =>
@@ -113,10 +145,10 @@ export default function AgentForm({
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
         <label style={labelStyle}>
-          Name <span style={{ color: "#ba9926" }}>*</span>
+          Name <span style={{ color: "var(--accent)" }}>*</span>
         </label>
         <input
-          style={inputStyle}
+          style={{ width: "100%" }}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Code Reviewer"
@@ -127,7 +159,7 @@ export default function AgentForm({
       <div>
         <label style={labelStyle}>Description</label>
         <input
-          style={inputStyle}
+          style={{ width: "100%" }}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="What does this agent do?"
@@ -136,10 +168,10 @@ export default function AgentForm({
 
       <div>
         <label style={labelStyle}>
-          Model <span style={{ color: "#ba9926" }}>*</span>
+          Model <span style={{ color: "var(--accent)" }}>*</span>
         </label>
         <select
-          style={inputStyle}
+          style={{ width: "100%" }}
           value={model}
           onChange={(e) => setModel(e.target.value)}
           required
@@ -155,7 +187,7 @@ export default function AgentForm({
       <div>
         <label style={labelStyle}>System Prompt</label>
         <textarea
-          style={{ ...inputStyle, minHeight: 120, resize: "vertical" }}
+          style={{ width: "100%", minHeight: 120, resize: "vertical" }}
           value={system}
           onChange={(e) => setSystem(e.target.value)}
           placeholder="Instructions for the agent..."
@@ -180,12 +212,105 @@ export default function AgentForm({
                 type="checkbox"
                 checked={selectedTools.includes(tool.value)}
                 onChange={() => handleToolToggle(tool.value)}
-                style={{ accentColor: "#ba9926" }}
+                style={{ accentColor: "var(--accent)" }}
               />
               {tool.label}
             </label>
           ))}
         </div>
+      </div>
+
+      {/* Skills Section */}
+      <div>
+        <label style={labelStyle}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Sparkles size={14} color="var(--accent)" />
+            Skills
+          </span>
+        </label>
+        {availableSkills.length === 0 ? (
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--text-muted)",
+              margin: 0,
+            }}
+          >
+            No skills available. Import skills from the Skills page.
+          </p>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              maxHeight: 200,
+              overflowY: "auto",
+              padding: "8px 0",
+            }}
+          >
+            {availableSkills.map((skill) => (
+              <label
+                key={skill.id}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: selectedSkills.includes(skill.id)
+                    ? "var(--accent-subtle)"
+                    : "transparent",
+                  border: selectedSkills.includes(skill.id)
+                    ? "1px solid var(--accent)"
+                    : "1px solid transparent",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedSkills.includes(skill.id)}
+                  onChange={() => handleSkillToggle(skill.id)}
+                  style={{
+                    accentColor: "var(--accent)",
+                    marginTop: 2,
+                  }}
+                />
+                <div>
+                  <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>
+                    {skill.name}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 400,
+                        color: "var(--text-muted)",
+                        marginLeft: 6,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.3px",
+                      }}
+                    >
+                      {skill.source}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      lineHeight: 1.4,
+                      marginTop: 2,
+                    }}
+                  >
+                    {skill.description.length > 80
+                      ? skill.description.substring(0, 80) + "..."
+                      : skill.description}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
@@ -201,13 +326,13 @@ export default function AgentForm({
             }}
           >
             <input
-              style={{ ...inputStyle, flex: 1 }}
+              style={{ flex: 1 }}
               value={server.name || ""}
               onChange={(e) => updateMcpServer(i, "name", e.target.value)}
               placeholder="Server name"
             />
             <input
-              style={{ ...inputStyle, flex: 2 }}
+              style={{ flex: 2 }}
               value={server.url}
               onChange={(e) => updateMcpServer(i, "url", e.target.value)}
               placeholder="https://mcp-server-url.example.com"
@@ -215,48 +340,40 @@ export default function AgentForm({
             <button
               type="button"
               onClick={() => removeMcpServer(i)}
+              className="btn-secondary"
               style={{
-                background: "none",
-                border: "1px solid #333",
-                borderRadius: 6,
-                color: "#a0a0a0",
-                padding: "8px 12px",
-                fontSize: 14,
+                padding: "8px 10px",
+                color: "var(--error)",
+                borderColor: "var(--error)",
               }}
             >
-              Remove
+              <Trash2 size={14} />
             </button>
           </div>
         ))}
         <button
           type="button"
           onClick={addMcpServer}
+          className="btn-secondary"
           style={{
-            background: "none",
-            border: "1px dashed #333",
-            borderRadius: 6,
-            color: "#a0a0a0",
             padding: "8px 16px",
             fontSize: 13,
+            borderStyle: "dashed",
+            gap: 6,
           }}
         >
-          + Add MCP Server
+          <Plus size={14} />
+          Add MCP Server
         </button>
       </div>
 
       <button
         type="submit"
         disabled={submitting || !name.trim()}
+        className="btn-primary"
         style={{
-          background: submitting ? "#7a6518" : "#ba9926",
-          color: "#000",
-          border: "none",
-          borderRadius: 6,
-          padding: "12px 24px",
-          fontSize: 15,
-          fontWeight: 600,
-          opacity: submitting || !name.trim() ? 0.6 : 1,
           alignSelf: "flex-start",
+          opacity: submitting || !name.trim() ? 0.6 : 1,
         }}
       >
         {submitting ? "Saving..." : submitLabel}

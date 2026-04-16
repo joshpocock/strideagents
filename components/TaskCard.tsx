@@ -1,48 +1,48 @@
 "use client";
 
+import { Circle, Loader, CheckCircle, XCircle } from "lucide-react";
 import type { BoardTask } from "@/lib/types";
 import SessionEventLog from "./SessionEventLog";
+import CostTicker from "./CostTicker";
+import { useCostTracker } from "@/lib/useCostTracker";
 
 interface TaskCardProps {
   task: BoardTask;
   onDragStart: (e: React.DragEvent, taskId: number) => void;
 }
 
-const statusColors: Record<string, string> = {
-  todo: "#555555",
-  in_progress: "#ba9926",
-  done: "#4caf50",
-  failed: "#ef5350",
-};
-
-const statusLabels: Record<string, string> = {
-  todo: "Todo",
-  in_progress: "In Progress",
-  done: "Done",
-  failed: "Failed",
+const statusConfig: Record<string, { color: string; icon: typeof Circle; label: string }> = {
+  todo: { color: "var(--text-muted)", icon: Circle, label: "Todo" },
+  in_progress: { color: "var(--accent)", icon: Loader, label: "In Progress" },
+  done: { color: "var(--success)", icon: CheckCircle, label: "Done" },
+  failed: { color: "var(--error)", icon: XCircle, label: "Failed" },
 };
 
 export default function TaskCard({ task, onDragStart }: TaskCardProps) {
   const streamUrl =
     task.status === "in_progress" ? `/api/board/${task.id}/stream` : null;
 
+  const costData = useCostTracker(streamUrl);
+  const config = statusConfig[task.status] || statusConfig.todo;
+  const StatusIcon = config.icon;
+
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       style={{
-        background: "#1a1a1a",
-        border: "1px solid #2a2a2a",
-        borderRadius: 8,
+        background: "var(--bg-card)",
+        border: "1px solid var(--border-color)",
+        borderRadius: 10,
         padding: 14,
         cursor: "grab",
         transition: "border-color 0.15s ease",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = "#3a3a3a";
+        (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-dashed)";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.borderColor = "#2a2a2a";
+        (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border-color)";
       }}
     >
       <div
@@ -58,17 +58,21 @@ export default function TaskCard({ task, onDragStart }: TaskCardProps) {
         </h4>
         <span
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
             fontSize: 11,
             fontWeight: 600,
-            color: "#000",
-            background: statusColors[task.status] || "#555",
+            color: config.color,
             padding: "2px 8px",
             borderRadius: 10,
             marginLeft: 8,
             whiteSpace: "nowrap",
+            background: "var(--bg-badge)",
           }}
         >
-          {statusLabels[task.status] || task.status}
+          <StatusIcon size={12} />
+          {config.label}
         </span>
       </div>
 
@@ -76,7 +80,7 @@ export default function TaskCard({ task, onDragStart }: TaskCardProps) {
         <p
           style={{
             fontSize: 13,
-            color: "#a0a0a0",
+            color: "var(--text-secondary)",
             margin: 0,
             marginBottom: streamUrl ? 10 : 0,
             overflow: "hidden",
@@ -92,14 +96,24 @@ export default function TaskCard({ task, onDragStart }: TaskCardProps) {
 
       {streamUrl && <SessionEventLog streamUrl={streamUrl} compact />}
 
+      {streamUrl && (
+        <CostTicker
+          inputTokens={costData.inputTokens}
+          outputTokens={costData.outputTokens}
+          model={costData.model}
+          sessionStartTime={costData.sessionStartTime}
+          compact
+        />
+      )}
+
       {task.status === "done" && task.result && (
         <div
           style={{
             marginTop: 10,
             fontSize: 12,
-            color: "#a0a0a0",
-            background: "#111",
-            borderRadius: 6,
+            color: "var(--text-secondary)",
+            background: "var(--bg-input)",
+            borderRadius: 8,
             padding: 8,
             maxHeight: 100,
             overflowY: "auto",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Send, RotateCcw } from "lucide-react";
 import type { Agent, ChatMessage } from "@/lib/types";
 
 function generateId(): string {
@@ -16,7 +17,6 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Load agents and initialize chat ID
   useEffect(() => {
     fetch("/api/agents")
       .then((r) => (r.ok ? r.json() : []))
@@ -36,7 +36,6 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -109,7 +108,7 @@ export default function ChatPage() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 100px)",
+        height: "calc(100vh - 56px - 48px)",
       }}
     >
       {/* Header */}
@@ -122,18 +121,10 @@ export default function ChatPage() {
           flexWrap: "wrap",
         }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Chat</h1>
         <select
           value={agentId}
           onChange={(e) => setAgentId(e.target.value)}
-          style={{
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 6,
-            color: "#fff",
-            padding: "8px 12px",
-            fontSize: 14,
-          }}
+          style={{ padding: "8px 12px", fontSize: 14 }}
         >
           {agents.length === 0 && <option value="">No agents available</option>}
           {agents.map((a) => (
@@ -144,15 +135,10 @@ export default function ChatPage() {
         </select>
         <button
           onClick={startNewChat}
-          style={{
-            background: "none",
-            border: "1px solid #2a2a2a",
-            borderRadius: 6,
-            color: "#a0a0a0",
-            padding: "8px 16px",
-            fontSize: 13,
-          }}
+          className="btn-secondary"
+          style={{ padding: "8px 14px", fontSize: 13, gap: 6 }}
         >
+          <RotateCcw size={14} />
           New Chat
         </button>
       </div>
@@ -175,7 +161,7 @@ export default function ChatPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#555",
+              color: "var(--text-muted)",
               fontSize: 15,
             }}
           >
@@ -187,8 +173,7 @@ export default function ChatPage() {
             key={i}
             style={{
               display: "flex",
-              justifyContent:
-                msg.role === "user" ? "flex-end" : "flex-start",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
             }}
           >
             <div
@@ -202,14 +187,14 @@ export default function ChatPage() {
                 wordBreak: "break-word",
                 ...(msg.role === "user"
                   ? {
-                      background: "#ba9926",
-                      color: "#000",
+                      background: "var(--accent)",
+                      color: "#FFFFFF",
                       borderBottomRightRadius: 4,
                     }
                   : {
-                      background: "#1a1a1a",
-                      border: "1px solid #2a2a2a",
-                      color: "#fff",
+                      background: "var(--bg-card)",
+                      border: "1px solid var(--border-color)",
+                      color: "var(--text-primary)",
                       borderBottomLeftRadius: 4,
                     }),
               }}
@@ -222,12 +207,12 @@ export default function ChatPage() {
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div
               style={{
-                background: "#1a1a1a",
-                border: "1px solid #2a2a2a",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
                 borderRadius: 12,
                 borderBottomLeftRadius: 4,
                 padding: "12px 16px",
-                color: "#a0a0a0",
+                color: "var(--text-secondary)",
                 fontSize: 14,
               }}
             >
@@ -244,7 +229,7 @@ export default function ChatPage() {
           display: "flex",
           gap: 8,
           paddingTop: 12,
-          borderTop: "1px solid #2a2a2a",
+          borderTop: "1px solid var(--border-color)",
         }}
       >
         <textarea
@@ -255,38 +240,19 @@ export default function ChatPage() {
           rows={1}
           style={{
             flex: 1,
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            color: "#fff",
-            padding: "12px 16px",
-            fontSize: 14,
             resize: "none",
-            outline: "none",
-            fontFamily: "inherit",
-          }}
-          onFocus={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = "#ba9926";
-          }}
-          onBlur={(e) => {
-            (e.target as HTMLTextAreaElement).style.borderColor = "#2a2a2a";
           }}
         />
         <button
           onClick={sendMessage}
           disabled={!input.trim() || !agentId || sending}
+          className="btn-primary"
           style={{
-            background: "#ba9926",
-            color: "#000",
-            border: "none",
-            borderRadius: 8,
-            padding: "12px 24px",
-            fontSize: 14,
-            fontWeight: 600,
+            padding: "12px 20px",
             opacity: !input.trim() || !agentId || sending ? 0.5 : 1,
           }}
         >
-          Send
+          <Send size={16} />
         </button>
       </div>
     </div>

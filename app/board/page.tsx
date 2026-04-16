@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import type { BoardTask, Agent } from "@/lib/types";
 import TaskCard from "@/components/TaskCard";
 import Modal from "@/components/Modal";
+import SearchBar from "@/components/SearchBar";
+import ShortcutHint from "@/components/ShortcutHint";
 
 type Column = "todo" | "in_progress" | "done";
 
@@ -14,9 +17,9 @@ const columns: { key: Column; label: string }[] = [
 ];
 
 const columnHeaderColors: Record<Column, string> = {
-  todo: "#555",
-  in_progress: "#ba9926",
-  done: "#4caf50",
+  todo: "var(--text-muted)",
+  in_progress: "var(--accent)",
+  done: "var(--success)",
 };
 
 export default function BoardPage() {
@@ -27,6 +30,17 @@ export default function BoardPage() {
   const [newDesc, setNewDesc] = useState("");
   const [newAgentId, setNewAgentId] = useState("");
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchParams = useSearchParams();
+
+  // Open modal when navigating with ?add=1 (from command palette / keyboard shortcut)
+  useEffect(() => {
+    if (searchParams.get("add") === "1") {
+      setModalOpen(true);
+      // Clean up the URL param
+      window.history.replaceState({}, "", "/board");
+    }
+  }, [searchParams]);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -46,7 +60,6 @@ export default function BoardPage() {
       .catch(() => {});
   }, [fetchTasks]);
 
-  // Poll for task updates every 5 seconds
   useEffect(() => {
     const interval = setInterval(fetchTasks, 5000);
     return () => clearInterval(interval);
@@ -65,7 +78,6 @@ export default function BoardPage() {
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === targetStatus) return;
 
-    // Optimistic update
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: targetStatus } : t))
     );
@@ -78,7 +90,7 @@ export default function BoardPage() {
       });
       fetchTasks();
     } catch {
-      fetchTasks(); // revert on failure
+      fetchTasks();
     }
   };
 
@@ -109,8 +121,18 @@ export default function BoardPage() {
     }
   };
 
+  const filteredTasks = useMemo(() => {
+    if (!search.trim()) return tasks;
+    const q = search.toLowerCase();
+    return tasks.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.description || "").toLowerCase().includes(q)
+    );
+  }, [tasks, search]);
+
   const tasksByColumn = (col: Column) =>
-    tasks.filter((t) => {
+    filteredTasks.filter((t) => {
       if (col === "done") return t.status === "done" || t.status === "failed";
       return t.status === col;
     });
@@ -123,33 +145,33 @@ export default function BoardPage() {
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 24,
+          gap: 16,
         }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
-          Task Board
-        </h1>
+        <div style={{ flex: 1, maxWidth: 400 }}>
+          <SearchBar
+            placeholder="Search tasks by title or description..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
         <button
           onClick={() => setModalOpen(true)}
-          style={{
-            background: "#ba9926",
-            color: "#000",
-            border: "none",
-            borderRadius: 6,
-            padding: "10px 20px",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
+          className="btn-primary"
+          style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
         >
           Add Task
+          <ShortcutHint keys="T" />
         </button>
       </div>
 
       <div
+        className="board-columns"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(3, 1fr)",
           gap: 16,
-          minHeight: "calc(100vh - 180px)",
+          minHeight: "calc(100vh - 220px)",
         }}
       >
         {columns.map((col) => (
@@ -158,10 +180,10 @@ export default function BoardPage() {
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, col.key)}
             style={{
-              background: "#0a0a0a",
-              borderRadius: 8,
+              background: "var(--bg-secondary)",
+              borderRadius: 12,
               padding: 16,
-              border: "1px solid #1a1a1a",
+              border: "1px solid var(--border-color)",
               display: "flex",
               flexDirection: "column",
               gap: 12,
@@ -189,7 +211,7 @@ export default function BoardPage() {
               <span
                 style={{
                   fontSize: 12,
-                  color: "#666",
+                  color: "var(--text-muted)",
                   marginLeft: "auto",
                 }}
               >
@@ -206,11 +228,11 @@ export default function BoardPage() {
             {tasksByColumn(col.key).length === 0 && (
               <div
                 style={{
-                  color: "#444",
+                  color: "var(--text-muted)",
                   fontSize: 13,
                   textAlign: "center",
                   padding: "24px 0",
-                  border: "2px dashed #1a1a1a",
+                  border: "2px dashed var(--border-color)",
                   borderRadius: 8,
                 }}
               >
@@ -228,7 +250,7 @@ export default function BoardPage() {
               style={{
                 display: "block",
                 fontSize: 13,
-                color: "#a0a0a0",
+                color: "var(--text-secondary)",
                 marginBottom: 6,
               }}
             >
@@ -238,15 +260,7 @@ export default function BoardPage() {
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               placeholder="Task title"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                background: "#111",
-                border: "1px solid #2a2a2a",
-                borderRadius: 6,
-                color: "#fff",
-                fontSize: 14,
-              }}
+              style={{ width: "100%" }}
             />
           </div>
           <div>
@@ -254,7 +268,7 @@ export default function BoardPage() {
               style={{
                 display: "block",
                 fontSize: 13,
-                color: "#a0a0a0",
+                color: "var(--text-secondary)",
                 marginBottom: 6,
               }}
             >
@@ -267,14 +281,7 @@ export default function BoardPage() {
               rows={3}
               style={{
                 width: "100%",
-                padding: "10px 12px",
-                background: "#111",
-                border: "1px solid #2a2a2a",
-                borderRadius: 6,
-                color: "#fff",
-                fontSize: 14,
                 resize: "vertical",
-                fontFamily: "inherit",
               }}
             />
           </div>
@@ -283,7 +290,7 @@ export default function BoardPage() {
               style={{
                 display: "block",
                 fontSize: 13,
-                color: "#a0a0a0",
+                color: "var(--text-secondary)",
                 marginBottom: 6,
               }}
             >
@@ -292,15 +299,7 @@ export default function BoardPage() {
             <select
               value={newAgentId}
               onChange={(e) => setNewAgentId(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                background: "#111",
-                border: "1px solid #2a2a2a",
-                borderRadius: 6,
-                color: "#fff",
-                fontSize: 14,
-              }}
+              style={{ width: "100%" }}
             >
               <option value="">No agent assigned</option>
               {agents.map((a) => (
@@ -313,16 +312,10 @@ export default function BoardPage() {
           <button
             onClick={createTask}
             disabled={!newTitle.trim() || creating}
+            className="btn-primary"
             style={{
-              background: "#ba9926",
-              color: "#000",
-              border: "none",
-              borderRadius: 6,
-              padding: "12px 24px",
-              fontSize: 14,
-              fontWeight: 600,
-              opacity: !newTitle.trim() || creating ? 0.5 : 1,
               alignSelf: "flex-end",
+              opacity: !newTitle.trim() || creating ? 0.5 : 1,
             }}
           >
             {creating ? "Creating..." : "Create Task"}

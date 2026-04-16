@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback } from "react";
+import { X } from "lucide-react";
 
 interface ModalProps {
   open: boolean;
@@ -35,7 +36,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(0,0,0,0.7)",
+        background: "var(--modal-overlay)",
         backdropFilter: "blur(4px)",
       }}
       onClick={(e) => {
@@ -44,9 +45,9 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
     >
       <div
         style={{
-          background: "#1a1a1a",
-          border: "1px solid #2a2a2a",
-          borderRadius: 8,
+          background: "var(--bg-card)",
+          border: "1px solid var(--border-color)",
+          borderRadius: 12,
           padding: 24,
           minWidth: 400,
           maxWidth: 560,
@@ -74,15 +75,25 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
             style={{
               background: "none",
               border: "none",
-              color: "#a0a0a0",
-              fontSize: 20,
-              lineHeight: 1,
+              color: "var(--text-secondary)",
               padding: 4,
               marginLeft: "auto",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 6,
             }}
             aria-label="Close"
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "var(--bg-card-hover)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "none";
+            }}
           >
-            &times;
+            <X size={18} />
           </button>
         </div>
         {children}

@@ -30,8 +30,8 @@ export async function GET(
         // Attempt to use the SDK streaming method.
         // If client.beta.sessions.stream() exists, use it.
         // Otherwise fall back to polling the events list endpoint.
-        if (typeof client.beta.sessions.stream === "function") {
-          const eventStream = client.beta.sessions.stream(id);
+        if (typeof (client.beta.sessions as any).stream === "function") {
+          const eventStream = (client.beta.sessions as any).stream(id);
 
           for await (const event of eventStream) {
             sendEvent(event.type || "message", event);
@@ -48,8 +48,9 @@ export async function GET(
                 listParams.after = lastEventId;
               }
 
+              // @ts-expect-error - list_events may not be in current SDK type defs
               const events = await client.beta.sessions.list_events(id, listParams);
-              const eventList = Array.isArray(events) ? events : (events as { data?: unknown[] }).data || [];
+              const eventList = Array.isArray(events) ? events : (events as unknown as { data?: unknown[] }).data || [];
 
               for (const event of eventList as Array<{ id?: string; type?: string; [key: string]: unknown }>) {
                 sendEvent(event.type || "message", event);

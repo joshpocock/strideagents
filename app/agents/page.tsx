@@ -1,12 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { Bot } from "lucide-react";
 import type { Agent } from "@/lib/types";
+import LoadingSkeleton from "@/components/LoadingSkeleton";
+import EmptyState from "@/components/EmptyState";
+import SearchBar from "@/components/SearchBar";
+import ShortcutHint from "@/components/ShortcutHint";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  const filteredAgents = useMemo(() => {
+    if (!search.trim()) return agents;
+    const q = search.toLowerCase();
+    return agents.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.description || "").toLowerCase().includes(q)
+    );
+  }, [agents, search]);
 
   useEffect(() => {
     fetch("/api/agents")
@@ -24,60 +40,49 @@ export default function AgentsPage() {
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 24,
+          gap: 16,
         }}
       >
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Agents</h1>
+        <div style={{ flex: 1, maxWidth: 400 }}>
+          <SearchBar
+            placeholder="Search agents by name or description..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
         <Link
           href="/agents/new"
-          style={{
-            background: "#ba9926",
-            color: "#000",
-            border: "none",
-            borderRadius: 6,
-            padding: "10px 20px",
-            fontSize: 14,
-            fontWeight: 600,
-            textDecoration: "none",
-          }}
+          className="btn-primary"
+          style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8 }}
         >
           Create Agent
+          <ShortcutHint keys="N" />
         </Link>
       </div>
 
       {loading ? (
-        <p style={{ color: "#a0a0a0" }}>Loading agents...</p>
-      ) : agents.length === 0 ? (
-        <div
-          style={{
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            padding: 48,
-            textAlign: "center",
-          }}
-        >
-          <p style={{ color: "#a0a0a0", fontSize: 15, marginBottom: 16 }}>
-            No agents yet. Create your first agent to get started.
-          </p>
-          <Link
-            href="/agents/new"
-            style={{
-              color: "#ba9926",
-              fontSize: 14,
-              fontWeight: 500,
-            }}
-          >
-            Create Agent
-          </Link>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: 16 }}>
+            <LoadingSkeleton height={20} width="30%" />
+          </div>
+          {[1, 2, 3].map((i) => (
+            <div key={i} style={{ padding: "12px 16px", borderTop: "1px solid var(--border-color)" }}>
+              <LoadingSkeleton height={16} width={`${60 + i * 10}%`} />
+            </div>
+          ))}
         </div>
+      ) : filteredAgents.length === 0 && !search ? (
+        <EmptyState
+          icon={Bot}
+          title="No agents yet"
+          description="Create your first agent to get started with managed AI agents."
+          actionLabel="Create Agent"
+          actionHref="/agents/new"
+        />
       ) : (
         <div
-          style={{
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
+          className="card"
+          style={{ padding: 0, overflow: "hidden" }}
         >
           <table>
             <thead>
@@ -89,7 +94,21 @@ export default function AgentsPage() {
               </tr>
             </thead>
             <tbody>
-              {agents.map((agent) => (
+              {filteredAgents.length === 0 && search && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    style={{
+                      textAlign: "center",
+                      color: "var(--text-muted)",
+                      padding: 32,
+                    }}
+                  >
+                    No agents match &quot;{search}&quot;
+                  </td>
+                </tr>
+              )}
+              {filteredAgents.map((agent) => (
                 <tr
                   key={agent.id}
                   style={{ cursor: "pointer" }}
@@ -98,7 +117,7 @@ export default function AgentsPage() {
                   }}
                   onMouseEnter={(e) => {
                     (e.currentTarget as HTMLTableRowElement).style.background =
-                      "#222";
+                      "var(--bg-card-hover)";
                   }}
                   onMouseLeave={(e) => {
                     (e.currentTarget as HTMLTableRowElement).style.background =
@@ -109,9 +128,9 @@ export default function AgentsPage() {
                   <td>
                     <span
                       style={{
-                        background: "#222",
+                        background: "var(--bg-badge)",
                         padding: "3px 8px",
-                        borderRadius: 4,
+                        borderRadius: 6,
                         fontSize: 12,
                         fontFamily: "monospace",
                       }}
@@ -119,10 +138,10 @@ export default function AgentsPage() {
                       {agent.model}
                     </span>
                   </td>
-                  <td style={{ color: "#a0a0a0" }}>
+                  <td style={{ color: "var(--text-secondary)" }}>
                     {agent.description || "-"}
                   </td>
-                  <td style={{ color: "#666", fontSize: 13 }}>
+                  <td style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     {agent.created_at
                       ? new Date(agent.created_at).toLocaleDateString()
                       : "-"}

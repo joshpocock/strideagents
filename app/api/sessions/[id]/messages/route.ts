@@ -32,6 +32,7 @@ export async function POST(
 
     // Send the user turn to the session.
     // The SDK handles polling until the agent's turn is complete.
+    // @ts-expect-error - turn may not be in current SDK type defs
     const response = await client.beta.sessions.turn(id, {
       messages: [
         {

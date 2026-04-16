@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { Copy } from "lucide-react";
 import type { Agent } from "@/lib/types";
 import AgentForm, { type AgentFormData } from "@/components/AgentForm";
 import Modal from "@/components/Modal";
+import LoadingSkeleton from "@/components/LoadingSkeleton";
+import { useToast } from "@/components/Toast";
 
 export default function AgentDetailPage() {
   const params = useParams();
@@ -16,6 +19,8 @@ export default function AgentDetailPage() {
   const [editing, setEditing] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const { showToast } = useToast();
 
   useEffect(() => {
     fetch(`/api/agents/${agentId}`)
@@ -51,6 +56,40 @@ export default function AgentDetailPage() {
     }
   };
 
+  const handleClone = async () => {
+    if (!agent) return;
+    setCloning(true);
+    try {
+      const body = {
+        name: `${agent.name} (Copy)`,
+        model: agent.model,
+        ...(agent.description && { description: agent.description }),
+        ...(agent.system && { system: agent.system }),
+        ...(agent.tools && { tools: agent.tools }),
+        ...(agent.mcp_servers && { mcp_servers: agent.mcp_servers }),
+      };
+
+      const res = await fetch("/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (res.ok) {
+        const newAgent = await res.json();
+        showToast("Agent cloned successfully", "success");
+        router.push(`/agents/${newAgent.id}`);
+      } else {
+        const err = await res.text();
+        showToast(`Failed to clone: ${err}`, "error");
+      }
+    } catch {
+      showToast("Failed to clone agent", "error");
+    } finally {
+      setCloning(false);
+    }
+  };
+
   const handleDelete = async () => {
     setDeleting(true);
     try {
@@ -66,22 +105,33 @@ export default function AgentDetailPage() {
   };
 
   if (loading) {
-    return <p style={{ color: "#a0a0a0" }}>Loading agent...</p>;
+    return (
+      <div style={{ maxWidth: 720 }}>
+        <LoadingSkeleton height={32} width="40%" />
+        <div className="card" style={{ marginTop: 24 }}>
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} style={{ padding: "12px 0", borderBottom: "1px solid var(--border-color)" }}>
+              <LoadingSkeleton height={16} width={`${50 + i * 10}%`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (!agent) {
-    return <p style={{ color: "#a0a0a0" }}>Agent not found.</p>;
+    return <p style={{ color: "var(--text-secondary)" }}>Agent not found.</p>;
   }
 
   const infoRowStyle: React.CSSProperties = {
     display: "flex",
     padding: "12px 0",
-    borderBottom: "1px solid #222",
+    borderBottom: "1px solid var(--border-color)",
   };
 
   const labelStyle: React.CSSProperties = {
     width: 140,
-    color: "#a0a0a0",
+    color: "var(--text-secondary)",
     fontSize: 13,
     fontWeight: 500,
     flexShrink: 0,
@@ -103,26 +153,13 @@ export default function AgentDetailPage() {
           </h1>
           <button
             onClick={() => setEditing(false)}
-            style={{
-              background: "none",
-              border: "1px solid #2a2a2a",
-              borderRadius: 6,
-              color: "#a0a0a0",
-              padding: "8px 16px",
-              fontSize: 13,
-            }}
+            className="btn-secondary"
+            style={{ padding: "8px 16px", fontSize: 13 }}
           >
             Cancel
           </button>
         </div>
-        <div
-          style={{
-            background: "#1a1a1a",
-            border: "1px solid #2a2a2a",
-            borderRadius: 8,
-            padding: 24,
-          }}
-        >
+        <div className="card">
           <AgentForm
             initialData={agent}
             onSubmit={handleUpdate}
@@ -148,29 +185,41 @@ export default function AgentDetailPage() {
         </h1>
         <div style={{ display: "flex", gap: 8 }}>
           <button
-            onClick={() => setEditing(true)}
+            onClick={handleClone}
+            disabled={cloning}
+            className="btn-secondary"
             style={{
-              background: "none",
-              border: "1px solid #ba9926",
-              borderRadius: 6,
-              color: "#ba9926",
               padding: "8px 16px",
               fontSize: 13,
-              fontWeight: 500,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: cloning ? 0.6 : 1,
+            }}
+          >
+            <Copy size={14} />
+            {cloning ? "Cloning..." : "Clone"}
+          </button>
+          <button
+            onClick={() => setEditing(true)}
+            className="btn-secondary"
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              color: "var(--accent)",
+              borderColor: "var(--accent)",
             }}
           >
             Edit
           </button>
           <button
             onClick={() => setDeleteConfirm(true)}
+            className="btn-secondary"
             style={{
-              background: "none",
-              border: "1px solid #ef5350",
-              borderRadius: 6,
-              color: "#ef5350",
               padding: "8px 16px",
               fontSize: 13,
-              fontWeight: 500,
+              color: "var(--error)",
+              borderColor: "var(--error)",
             }}
           >
             Delete
@@ -178,14 +227,7 @@ export default function AgentDetailPage() {
         </div>
       </div>
 
-      <div
-        style={{
-          background: "#1a1a1a",
-          border: "1px solid #2a2a2a",
-          borderRadius: 8,
-          padding: 24,
-        }}
-      >
+      <div className="card">
         <div style={infoRowStyle}>
           <span style={labelStyle}>ID</span>
           <span style={{ fontFamily: "monospace", fontSize: 13 }}>
@@ -196,9 +238,9 @@ export default function AgentDetailPage() {
           <span style={labelStyle}>Model</span>
           <span
             style={{
-              background: "#222",
+              background: "var(--bg-badge)",
               padding: "2px 8px",
-              borderRadius: 4,
+              borderRadius: 6,
               fontSize: 13,
               fontFamily: "monospace",
             }}
@@ -208,7 +250,7 @@ export default function AgentDetailPage() {
         </div>
         <div style={infoRowStyle}>
           <span style={labelStyle}>Description</span>
-          <span style={{ color: agent.description ? "#fff" : "#666" }}>
+          <span style={{ color: agent.description ? "var(--text-primary)" : "var(--text-muted)" }}>
             {agent.description || "None"}
           </span>
         </div>
@@ -216,7 +258,7 @@ export default function AgentDetailPage() {
           <span style={labelStyle}>System Prompt</span>
           <span
             style={{
-              color: agent.system ? "#fff" : "#666",
+              color: agent.system ? "var(--text-primary)" : "var(--text-muted)",
               whiteSpace: "pre-wrap",
               fontSize: 13,
               flex: 1,
@@ -233,9 +275,9 @@ export default function AgentDetailPage() {
                 <span
                   key={i}
                   style={{
-                    background: "#222",
+                    background: "var(--bg-badge)",
                     padding: "2px 8px",
-                    borderRadius: 4,
+                    borderRadius: 6,
                     fontSize: 12,
                     fontFamily: "monospace",
                   }}
@@ -244,7 +286,7 @@ export default function AgentDetailPage() {
                 </span>
               ))
             ) : (
-              <span style={{ color: "#666" }}>None</span>
+              <span style={{ color: "var(--text-muted)" }}>None</span>
             )}
           </div>
         </div>
@@ -256,14 +298,14 @@ export default function AgentDetailPage() {
                 <div
                   key={i}
                   style={{
-                    background: "#111",
+                    background: "var(--bg-input)",
                     padding: "8px 12px",
-                    borderRadius: 6,
+                    borderRadius: 8,
                     marginBottom: 6,
                     fontSize: 13,
                   }}
                 >
-                  <span style={{ color: "#ba9926", fontWeight: 500 }}>
+                  <span style={{ color: "var(--accent)", fontWeight: 500 }}>
                     {server.name || "Unnamed"}
                   </span>
                   <br />
@@ -271,7 +313,7 @@ export default function AgentDetailPage() {
                     style={{
                       fontFamily: "monospace",
                       fontSize: 12,
-                      color: "#a0a0a0",
+                      color: "var(--text-secondary)",
                     }}
                   >
                     {server.url}
@@ -279,25 +321,17 @@ export default function AgentDetailPage() {
                 </div>
               ))
             ) : (
-              <span style={{ color: "#666" }}>None</span>
+              <span style={{ color: "var(--text-muted)" }}>None</span>
             )}
           </div>
         </div>
       </div>
 
-      <div
-        style={{
-          marginTop: 24,
-          background: "#1a1a1a",
-          border: "1px solid #2a2a2a",
-          borderRadius: 8,
-          padding: 24,
-        }}
-      >
+      <div className="card" style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
           Recent Sessions
         </h2>
-        <p style={{ color: "#666", fontSize: 14 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: 14 }}>
           No sessions recorded for this agent yet.
         </p>
       </div>
@@ -307,21 +341,15 @@ export default function AgentDetailPage() {
         onClose={() => setDeleteConfirm(false)}
         title="Delete Agent"
       >
-        <p style={{ color: "#a0a0a0", marginBottom: 20, fontSize: 14 }}>
+        <p style={{ color: "var(--text-secondary)", marginBottom: 20, fontSize: 14 }}>
           Are you sure you want to delete <strong>{agent.name}</strong>? This
           action cannot be undone.
         </p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button
             onClick={() => setDeleteConfirm(false)}
-            style={{
-              background: "none",
-              border: "1px solid #2a2a2a",
-              borderRadius: 6,
-              color: "#a0a0a0",
-              padding: "8px 16px",
-              fontSize: 13,
-            }}
+            className="btn-secondary"
+            style={{ padding: "8px 16px", fontSize: 13 }}
           >
             Cancel
           </button>
@@ -329,14 +357,15 @@ export default function AgentDetailPage() {
             onClick={handleDelete}
             disabled={deleting}
             style={{
-              background: "#ef5350",
-              color: "#fff",
+              background: "var(--error)",
+              color: "#FFFFFF",
               border: "none",
-              borderRadius: 6,
+              borderRadius: 8,
               padding: "8px 16px",
               fontSize: 13,
               fontWeight: 600,
               opacity: deleting ? 0.6 : 1,
+              cursor: "pointer",
             }}
           >
             {deleting ? "Deleting..." : "Delete"}

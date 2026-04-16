@@ -51,6 +51,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     const client = getClient();
+    // @ts-expect-error - delete may not be in current SDK type defs
     const result = await client.beta.agents.delete(id);
     return NextResponse.json(result);
   } catch (error: unknown) {
