@@ -8,7 +8,11 @@ import { getClient } from "@/lib/anthropic";
 export async function GET() {
   try {
     const client = getClient();
-    const agents = await client.beta.agents.list();
+    const response: any = await (client.beta as any).agents.list();
+    // Normalize paginated response to plain array
+    const agents = Array.isArray(response)
+      ? response
+      : (response?.data ?? []);
     return NextResponse.json(agents);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to list agents";

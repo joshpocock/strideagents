@@ -8,7 +8,11 @@ import { getClient } from "@/lib/anthropic";
 export async function GET() {
   try {
     const client = getClient();
-    const environments = await client.beta.environments.list();
+    const response: any = await (client.beta as any).environments.list();
+    // Normalize paginated response to plain array
+    const environments = Array.isArray(response)
+      ? response
+      : (response?.data ?? []);
     return NextResponse.json(environments);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to list environments";
@@ -37,8 +41,9 @@ export async function POST(request: Request) {
     }
 
     const client = getClient();
-    const environment = await client.beta.environments.create({
-      name,
+    // Anthropic API uses display_name for environments
+    const environment = await (client.beta as any).environments.create({
+      display_name: name,
       ...(setup_commands && { setup_commands }),
       ...(network_access !== undefined && { network_access }),
     });

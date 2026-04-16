@@ -14,7 +14,11 @@ export default function EnvironmentsPage() {
   useEffect(() => {
     fetch("/api/environments")
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: Environment[]) => setEnvironments(data))
+      .then((data) => {
+        // Handle paginated response or direct array
+        const list = Array.isArray(data) ? data : (data?.data ?? []);
+        setEnvironments(list);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

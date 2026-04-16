@@ -19,7 +19,11 @@ export async function GET(request: Request) {
       listParams.agent_id = agentId;
     }
 
-    const sessions = await client.beta.sessions.list(listParams);
+    const response: any = await (client.beta as any).sessions.list(listParams);
+    // Normalize paginated response to plain array
+    const sessions = Array.isArray(response)
+      ? response
+      : (response?.data ?? []);
     return NextResponse.json(sessions);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to list sessions";

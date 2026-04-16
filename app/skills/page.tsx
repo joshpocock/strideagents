@@ -15,9 +15,9 @@ import {
   Database,
   PenTool,
   Link as LinkIcon,
-  X,
 } from "lucide-react";
 import Modal from "@/components/Modal";
+import { useToast } from "@/components/Toast";
 
 interface Skill {
   id: string;
@@ -27,6 +27,7 @@ interface Skill {
   source: "bundled" | "anthropic" | "github";
   category: string;
   content: string;
+  anthropic_skill_id?: string;
 }
 
 interface Agent {
@@ -69,6 +70,7 @@ const categoryIcons: Record<string, typeof Wrench> = {
 };
 
 export default function SkillsPage() {
+  const { showToast } = useToast();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +81,7 @@ export default function SkillsPage() {
   const [importUrl, setImportUrl] = useState("");
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState("");
+  const [installingId, setInstallingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -119,6 +122,32 @@ export default function SkillsPage() {
   }, [skills, activeTab, searchQuery]);
 
   const selectedSkill = skills.find((s) => s.id === selectedId) || null;
+
+  const handleInstall = async (skill: Skill) => {
+    if (!skill.anthropic_skill_id) return;
+    setInstallingId(skill.id);
+    try {
+      const res = await fetch("/api/skills/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anthropic_skill_id: skill.anthropic_skill_id,
+          name: skill.name,
+          description: skill.description,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || "Failed to install skill", "error");
+        return;
+      }
+      showToast(`${skill.name} installed successfully`, "success");
+    } catch {
+      showToast("Network error while installing skill", "error");
+    } finally {
+      setInstallingId(null);
+    }
+  };
 
   const handleImport = async () => {
     if (!importUrl.trim()) return;
@@ -310,9 +339,12 @@ export default function SkillsPage() {
                   textAlign: "center",
                   color: "var(--text-muted)",
                   fontSize: 13,
+                  lineHeight: 1.6,
                 }}
               >
-                No skills found
+                {activeTab === "anthropic"
+                  ? "Anthropic Skills Library is coming soon. Check back as more official skills are published."
+                  : "No skills found"}
               </div>
             ) : (
               filteredSkills.map((skill) => {
@@ -414,7 +446,12 @@ export default function SkillsPage() {
           }}
         >
           {selectedSkill ? (
-            <SkillDetail skill={selectedSkill} agents={agents} />
+            <SkillDetail
+              skill={selectedSkill}
+              agents={agents}
+              onInstall={handleInstall}
+              installing={installingId === selectedSkill.id}
+            />
           ) : (
             <div
               style={{
@@ -532,9 +569,13 @@ export default function SkillsPage() {
 function SkillDetail({
   skill,
   agents,
+  onInstall,
+  installing,
 }: {
   skill: Skill;
   agents: Agent[];
+  onInstall: (skill: Skill) => void;
+  installing: boolean;
 }) {
   const [attachAgent, setAttachAgent] = useState("");
   const [attached, setAttached] = useState(false);
@@ -843,6 +884,24 @@ function SkillDetail({
         >
           {attached ? "Attached" : "Attach"}
         </button>
+        {skill.source === "anthropic" && (
+          <button
+            className="btn-primary"
+            onClick={() => onInstall(skill)}
+            disabled={installing}
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: installing ? 0.6 : 1,
+            }}
+          >
+            <Plus size={14} />
+            {installing ? "Installing..." : "Install"}
+          </button>
+        )}
         {skill.source === "github" && (
           <button
             className="btn-secondary"

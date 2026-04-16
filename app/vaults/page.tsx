@@ -1,69 +1,46 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { Shield, ChevronRight } from "lucide-react";
-import type { Vault, Credential } from "@/lib/types";
+import { useRouter } from "next/navigation";
+import {
+  Shield,
+  Plus,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import type { Vault } from "@/lib/types";
 import Modal from "@/components/Modal";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import EmptyState from "@/components/EmptyState";
-import SearchBar from "@/components/SearchBar";
 
-interface VaultWithCredentials extends Vault {
-  credentials: Credential[];
-  expanded: boolean;
-}
+type FilterTab = "all" | "active";
+
+const ITEMS_PER_PAGE = 10;
 
 export default function VaultsPage() {
-  const [vaults, setVaults] = useState<VaultWithCredentials[]>([]);
+  const router = useRouter();
+  const [vaults, setVaults] = useState<Vault[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Create vault modal
   const [createVaultOpen, setCreateVaultOpen] = useState(false);
   const [vaultName, setVaultName] = useState("");
   const [creatingVault, setCreatingVault] = useState(false);
 
-  const [credVaultId, setCredVaultId] = useState<string | null>(null);
-  const [credName, setCredName] = useState("");
-  const [credType, setCredType] = useState("api_key");
-  const [credToken, setCredToken] = useState("");
-  const [credMcpUrl, setCredMcpUrl] = useState("");
-  const [addingCred, setAddingCred] = useState(false);
-  const [search, setSearch] = useState("");
-
-  const filteredVaults = useMemo(() => {
-    if (!search.trim()) return vaults;
-    const q = search.toLowerCase();
-    return vaults.filter((v) => v.name.toLowerCase().includes(q));
-  }, [vaults, search]);
+  // Filters and pagination
+  const [activeTab, setActiveTab] = useState<FilterTab>("all");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchVaults = async () => {
     try {
       const res = await fetch("/api/vaults");
       if (!res.ok) return;
       const data: Vault[] = await res.json();
-
-      const withCreds: VaultWithCredentials[] = await Promise.all(
-        data.map(async (v) => {
-          let credentials: Credential[] = [];
-          try {
-            const cRes = await fetch(`/api/vaults/${v.id}/credentials`);
-            if (cRes.ok) {
-              const cData = await cRes.json();
-              // Handle paginated response or direct array
-              credentials = Array.isArray(cData) ? cData : (cData?.data ?? []);
-            }
-          } catch { /* ignore */ }
-          return { ...v, credentials, expanded: false };
-        })
-      );
-
-      setVaults((prev) => {
-        const expandedMap = new Map(prev.map((v) => [v.id, v.expanded]));
-        return withCreds.map((v) => ({
-          ...v,
-          expanded: expandedMap.get(v.id) || false,
-        }));
-      });
-    } catch { /* ignore */ } finally {
+      setVaults(Array.isArray(data) ? data : []);
+    } catch {
+      /* ignore */
+    } finally {
       setLoading(false);
     }
   };
@@ -72,11 +49,17 @@ export default function VaultsPage() {
     fetchVaults();
   }, []);
 
-  const toggleExpand = (id: string) => {
-    setVaults((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, expanded: !v.expanded } : v))
-    );
-  };
+  const filteredVaults = useMemo(() => {
+    // For now all vaults are "active" since the API doesn't have archived status
+    // When activeTab is "active", we still show all (they're all active)
+    return vaults;
+  }, [vaults, activeTab]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredVaults.length / ITEMS_PER_PAGE));
+  const paginatedVaults = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredVaults.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredVaults, currentPage]);
 
   const createVault = async () => {
     if (!vaultName.trim()) return;
@@ -99,35 +82,19 @@ export default function VaultsPage() {
     }
   };
 
-  const addCredential = async () => {
-    if (!credVaultId || !credName.trim()) return;
-    setAddingCred(true);
-    try {
-      const auth: Record<string, string> = { type: credType };
-      if (credToken.trim()) auth.token = credToken.trim();
-      if (credMcpUrl.trim()) auth.mcp_server_url = credMcpUrl.trim();
-
-      const res = await fetch(`/api/vaults/${credVaultId}/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          display_name: credName.trim(),
-          auth,
-        }),
-      });
-      if (res.ok) {
-        setCredVaultId(null);
-        setCredName("");
-        setCredToken("");
-        setCredMcpUrl("");
-        fetchVaults();
-      } else {
-        alert("Failed to add credential");
-      }
-    } finally {
-      setAddingCred(false);
-    }
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   };
+
+  const tabs: { key: FilterTab; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "active", label: "Active" },
+  ];
 
   const labelStyle: React.CSSProperties = {
     display: "block",
@@ -139,267 +106,462 @@ export default function VaultsPage() {
 
   return (
     <div>
+      {/* Header */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
+          alignItems: "flex-start",
           marginBottom: 24,
-          gap: 16,
         }}
       >
-        <div style={{ flex: 1, maxWidth: 400 }}>
-          <SearchBar
-            placeholder="Search vaults by name..."
-            value={search}
-            onChange={setSearch}
-          />
+        <div>
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              marginBottom: 4,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <Shield size={24} color="var(--accent)" />
+            Credential Vaults
+          </h1>
+          <p
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: 14,
+              margin: 0,
+            }}
+          >
+            Manage credential vaults that provide your agents with access to MCP
+            servers and other tools.
+          </p>
         </div>
         <button
           onClick={() => setCreateVaultOpen(true)}
           className="btn-primary"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexShrink: 0,
+          }}
         >
-          Create Vault
+          <Plus size={16} />
+          New vault
         </button>
       </div>
 
+      {/* Filter Tabs */}
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 16,
+        }}
+      >
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => {
+              setActiveTab(tab.key);
+              setCurrentPage(1);
+            }}
+            style={{
+              padding: "6px 14px",
+              fontSize: 13,
+              fontWeight: activeTab === tab.key ? 600 : 400,
+              color:
+                activeTab === tab.key
+                  ? "var(--accent)"
+                  : "var(--text-secondary)",
+              background:
+                activeTab === tab.key ? "var(--accent-subtle)" : "transparent",
+              border:
+                activeTab === tab.key
+                  ? "1px solid var(--accent)"
+                  : "1px solid transparent",
+              borderRadius: 6,
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
       {loading ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {[1, 2].map((i) => (
-            <div key={i} className="card">
-              <LoadingSkeleton height={20} width="40%" />
-            </div>
-          ))}
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%" }}>
+            <thead>
+              <tr
+                style={{
+                  background: "var(--bg-secondary)",
+                  borderBottom: "1px solid var(--border-color)",
+                }}
+              >
+                <th>ID</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3].map((i) => (
+                <tr key={i}>
+                  <td>
+                    <LoadingSkeleton height={16} width="80%" />
+                  </td>
+                  <td>
+                    <LoadingSkeleton height={16} width="60%" />
+                  </td>
+                  <td>
+                    <LoadingSkeleton height={16} width="50px" />
+                  </td>
+                  <td>
+                    <LoadingSkeleton height={16} width="70%" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : filteredVaults.length === 0 && !search ? (
+      ) : filteredVaults.length === 0 ? (
         <EmptyState
           icon={Shield}
           title="No vaults yet"
-          description="Create one to securely store credentials for your agents."
-          actionLabel="Create Vault"
+          description="Create a credential vault to securely store credentials for your agents."
+          actionLabel="New vault"
           actionHref="#"
         />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {filteredVaults.length === 0 && search && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "var(--text-muted)",
-                padding: 32,
-                background: "var(--bg-card)",
-                border: "1px solid var(--border-color)",
-                borderRadius: 12,
-              }}
-            >
-              No vaults match &quot;{search}&quot;
-            </div>
-          )}
-          {filteredVaults.map((vault) => (
-            <div
-              key={vault.id}
-              className="card"
-              style={{ padding: 0, overflow: "hidden" }}
-            >
-              <div
-                onClick={() => toggleExpand(vault.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "16px 20px",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <ChevronRight
-                    size={16}
-                    color="var(--accent)"
-                    style={{
-                      transform: vault.expanded ? "rotate(90deg)" : "rotate(0)",
-                      transition: "transform 0.15s ease",
-                    }}
-                  />
-                  <span style={{ fontWeight: 600, fontSize: 15 }}>
-                    {vault.name}
-                  </span>
-                  <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                    {vault.credentials.length} credential
-                    {vault.credentials.length !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                  {vault.created_at
-                    ? new Date(vault.created_at).toLocaleDateString()
-                    : ""}
-                </span>
-              </div>
-
-              {vault.expanded && (
-                <div
+        <>
+          {/* Vaults Table */}
+          <div
+            className="card"
+            style={{ padding: 0, overflow: "hidden" }}
+          >
+            <table style={{ width: "100%" }}>
+              <thead>
+                <tr
                   style={{
-                    borderTop: "1px solid var(--border-color)",
-                    padding: "16px 20px",
+                    background: "var(--bg-secondary)",
                   }}
                 >
-                  {(!Array.isArray(vault.credentials) || vault.credentials.length === 0) ? (
-                    <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
-                      No credentials in this vault.
-                    </p>
-                  ) : (
-                    <div style={{ marginBottom: 12 }}>
-                      {(Array.isArray(vault.credentials) ? vault.credentials : []).map((cred) => (
-                        <div
-                          key={cred.id}
-                          style={{
-                            background: "var(--bg-input)",
-                            borderRadius: 8,
-                            padding: "12px 16px",
-                            marginBottom: 8,
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 500, fontSize: 14 }}>
-                              {cred.display_name}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: "var(--text-muted)",
-                                marginTop: 2,
-                              }}
-                            >
-                              Type: {cred.auth.type}
-                              {cred.auth.mcp_server_url &&
-                                ` | MCP: ${cred.auth.mcp_server_url}`}
-                            </div>
-                          </div>
-                          <span
-                            style={{
-                              fontSize: 12,
-                              color: "var(--text-muted)",
-                              fontFamily: "monospace",
-                            }}
-                          >
-                            {cred.id.slice(0, 12)}...
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCredVaultId(vault.id);
-                    }}
-                    className="btn-secondary"
+                  <th
                     style={{
-                      padding: "8px 16px",
-                      fontSize: 13,
-                      borderStyle: "dashed",
+                      padding: "10px 16px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "var(--text-secondary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
                     }}
                   >
-                    + Add Credential
-                  </button>
-                </div>
-              )}
+                    ID
+                  </th>
+                  <th
+                    style={{
+                      padding: "10px 16px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "var(--text-secondary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    Name
+                  </th>
+                  <th
+                    style={{
+                      padding: "10px 16px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "var(--text-secondary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    Status
+                  </th>
+                  <th
+                    style={{
+                      padding: "10px 16px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "var(--text-secondary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                    }}
+                  >
+                    Created
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedVaults.map((vault) => (
+                  <tr
+                    key={vault.id}
+                    onClick={() => router.push(`/vaults/${vault.id}`)}
+                    style={{
+                      cursor: "pointer",
+                      transition: "background 0.1s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background =
+                        "var(--bg-card-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontFamily: "monospace",
+                        fontSize: 13,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {vault.id.length > 20
+                        ? vault.id.slice(0, 20) + "..."
+                        : vault.id}
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontWeight: 500,
+                        fontSize: 14,
+                      }}
+                    >
+                      {vault.name}
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "3px 10px",
+                          borderRadius: 12,
+                          fontSize: 12,
+                          fontWeight: 500,
+                          background: "rgba(34, 197, 94, 0.1)",
+                          color: "var(--success)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: "var(--success)",
+                          }}
+                        />
+                        Active
+                      </span>
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontSize: 13,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {formatDate(vault.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: 16,
+                padding: "0 4px",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to{" "}
+                {Math.min(
+                  currentPage * ITEMS_PER_PAGE,
+                  filteredVaults.length
+                )}{" "}
+                of {filteredVaults.length} vaults
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() =>
+                    setCurrentPage((p) => Math.max(1, p - 1))
+                  }
+                  disabled={currentPage === 1}
+                  className="btn-secondary"
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 13,
+                    opacity: currentPage === 1 ? 0.4 : 1,
+                  }}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (page) => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 13,
+                        fontWeight: currentPage === page ? 600 : 400,
+                        background:
+                          currentPage === page
+                            ? "var(--accent)"
+                            : "transparent",
+                        color:
+                          currentPage === page
+                            ? "#FFFFFF"
+                            : "var(--text-secondary)",
+                        border:
+                          currentPage === page
+                            ? "none"
+                            : "1px solid var(--border-color)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
+                  disabled={currentPage === totalPages}
+                  className="btn-secondary"
+                  style={{
+                    padding: "6px 10px",
+                    fontSize: 13,
+                    opacity: currentPage === totalPages ? 0.4 : 1,
+                  }}
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Create Vault Modal */}
       <Modal
         open={createVaultOpen}
-        onClose={() => setCreateVaultOpen(false)}
-        title="Create Vault"
+        onClose={() => {
+          setCreateVaultOpen(false);
+          setVaultName("");
+        }}
+        title="Create vault"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Warning callout */}
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              padding: "12px 16px",
+              borderRadius: 8,
+              border: "1px solid var(--accent)",
+              background: "var(--accent-bg)",
+            }}
+          >
+            <AlertTriangle
+              size={18}
+              color="var(--accent)"
+              style={{ flexShrink: 0, marginTop: 1 }}
+            />
+            <p
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Vaults are shared across this workspace. Credentials added to this
+              vault will be usable by anyone with API key access.
+            </p>
+          </div>
+
           <div>
-            <label style={labelStyle}>Vault Name</label>
+            <label style={labelStyle}>Name</label>
             <input
               style={{ width: "100%" }}
               value={vaultName}
-              onChange={(e) => setVaultName(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value.length <= 50) {
+                  setVaultName(e.target.value);
+                }
+              }}
               placeholder="e.g. Production Secrets"
             />
-          </div>
-          <button
-            onClick={createVault}
-            disabled={!vaultName.trim() || creatingVault}
-            className="btn-primary"
-            style={{
-              alignSelf: "flex-end",
-              opacity: !vaultName.trim() || creatingVault ? 0.5 : 1,
-            }}
-          >
-            {creatingVault ? "Creating..." : "Create"}
-          </button>
-        </div>
-      </Modal>
-
-      {/* Add Credential Modal */}
-      <Modal
-        open={credVaultId !== null}
-        onClose={() => setCredVaultId(null)}
-        title="Add Credential"
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <label style={labelStyle}>Display Name</label>
-            <input
-              style={{ width: "100%" }}
-              value={credName}
-              onChange={(e) => setCredName(e.target.value)}
-              placeholder="e.g. GitHub Token"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Type</label>
-            <select
-              style={{ width: "100%" }}
-              value={credType}
-              onChange={(e) => setCredType(e.target.value)}
+            <span
+              style={{
+                display: "block",
+                fontSize: 12,
+                color: "var(--text-muted)",
+                marginTop: 4,
+              }}
             >
-              <option value="api_key">API Key</option>
-              <option value="oauth2">OAuth2</option>
-              <option value="bearer_token">Bearer Token</option>
-              <option value="custom">Custom</option>
-            </select>
+              50 characters or fewer
+            </span>
           </div>
-          <div>
-            <label style={labelStyle}>Token / Secret</label>
-            <input
-              style={{ width: "100%" }}
-              type="password"
-              value={credToken}
-              onChange={(e) => setCredToken(e.target.value)}
-              placeholder="Enter secret value"
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>MCP Server URL (optional)</label>
-            <input
-              style={{ width: "100%" }}
-              value={credMcpUrl}
-              onChange={(e) => setCredMcpUrl(e.target.value)}
-              placeholder="https://mcp-server.example.com"
-            />
-          </div>
-          <button
-            onClick={addCredential}
-            disabled={!credName.trim() || addingCred}
-            className="btn-primary"
+
+          <div
             style={{
-              alignSelf: "flex-end",
-              opacity: !credName.trim() || addingCred ? 0.5 : 1,
+              display: "flex",
+              gap: 8,
+              justifyContent: "flex-end",
             }}
           >
-            {addingCred ? "Adding..." : "Add Credential"}
-          </button>
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setCreateVaultOpen(false);
+                setVaultName("");
+              }}
+              style={{ padding: "8px 16px", fontSize: 13 }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={createVault}
+              disabled={!vaultName.trim() || creatingVault}
+              className="btn-primary"
+              style={{
+                padding: "8px 20px",
+                fontSize: 13,
+                opacity: !vaultName.trim() || creatingVault ? 0.5 : 1,
+              }}
+            >
+              {creatingVault ? "Creating..." : "Create"}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

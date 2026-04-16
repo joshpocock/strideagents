@@ -12,6 +12,7 @@ export interface BundledSkill {
   source: "bundled" | "anthropic" | "github";
   category: string;
   content: string;
+  anthropic_skill_id?: string;
 }
 
 const BUNDLED_SKILLS: BundledSkill[] = [
@@ -178,11 +179,173 @@ Attach this skill to an agent and provide a URL along with what data you want ex
 - **Retries** - Automatic retry on transient failures
 `,
   },
+  {
+    id: "bundled-api-integration",
+    name: "API Integration",
+    description: "Connects to REST APIs, handles auth, pagination, and error retries.",
+    author: "Anthropic",
+    source: "bundled",
+    category: "Development",
+    content: `# API Integration
+
+A skill for connecting to and interacting with REST APIs.
+
+## Capabilities
+
+- REST API request construction (GET, POST, PUT, DELETE, PATCH)
+- Authentication handling (API keys, OAuth2, Bearer tokens)
+- Automatic pagination traversal
+- Rate limit detection and backoff
+- Error retry with exponential backoff
+- Response parsing and transformation
+- Request/response logging
+
+## Usage
+
+Attach this skill to an agent and provide an API endpoint along with the desired action. The agent will handle authentication, construct the request, and process the response.
+
+## Supported Auth Methods
+
+- **API Key** - Header or query parameter
+- **Bearer Token** - Authorization header
+- **OAuth2** - Client credentials or authorization code flow
+- **Basic Auth** - Username and password
+`,
+  },
+  {
+    id: "bundled-database-query",
+    name: "Database Query",
+    description: "Runs SQL queries, analyzes schemas, and generates reports from databases.",
+    author: "Anthropic",
+    source: "bundled",
+    category: "Data",
+    content: `# Database Query
+
+A skill for interacting with SQL databases and generating data-driven reports.
+
+## Capabilities
+
+- SQL query construction and execution
+- Schema exploration and documentation
+- Data aggregation and reporting
+- Query optimization suggestions
+- Result formatting (tables, CSV, JSON)
+- Cross-table relationship analysis
+
+## Usage
+
+Attach this skill to an agent with database access. Provide a question in natural language and the agent will construct the appropriate SQL query, execute it, and present the results.
+
+## Supported Databases
+
+- PostgreSQL
+- MySQL / MariaDB
+- SQLite
+- Microsoft SQL Server
+`,
+  },
+  {
+    id: "bundled-email-drafter",
+    name: "Email Drafter",
+    description: "Drafts professional emails based on context, tone, and recipient.",
+    author: "Anthropic",
+    source: "bundled",
+    category: "Content",
+    content: `# Email Drafter
+
+A skill for drafting professional emails tailored to context, tone, and audience.
+
+## Capabilities
+
+- Professional email composition
+- Tone adaptation (formal, friendly, urgent, follow-up)
+- Subject line optimization
+- Context-aware threading (replies, forwards)
+- Template-based generation
+- Multi-recipient handling with CC/BCC suggestions
+
+## Usage
+
+Attach this skill to an agent and describe the email you need. Specify the recipient, context, desired tone, and key points. The agent will produce a polished email ready to send.
+
+## Tone Options
+
+- **Formal** - Business communication, executive updates
+- **Friendly** - Team communication, casual check-ins
+- **Urgent** - Time-sensitive requests, escalations
+- **Follow-up** - Reminders, status updates
+`,
+  },
+  {
+    id: "bundled-test-writer",
+    name: "Test Writer",
+    description: "Generates unit tests, integration tests, and test fixtures for codebases.",
+    author: "Anthropic",
+    source: "bundled",
+    category: "Development",
+    content: `# Test Writer
+
+A skill for generating comprehensive test suites for your codebase.
+
+## Capabilities
+
+- Unit test generation with full coverage
+- Integration test scaffolding
+- Test fixture and mock data creation
+- Edge case identification
+- Snapshot test generation
+- Property-based test suggestions
+
+## Usage
+
+Attach this skill to an agent and provide a function, class, or module. The agent will analyze the code, identify test cases, and generate a complete test suite.
+
+## Supported Frameworks
+
+- **JavaScript/TypeScript** - Jest, Vitest, Mocha
+- **Python** - pytest, unittest
+- **Go** - testing package
+- **Rust** - built-in test framework
+`,
+  },
+  {
+    id: "bundled-documentation-generator",
+    name: "Documentation Generator",
+    description: "Creates API docs, README files, and technical guides from code.",
+    author: "Anthropic",
+    source: "bundled",
+    category: "Development",
+    content: `# Documentation Generator
+
+A skill for creating technical documentation from codebases.
+
+## Capabilities
+
+- API reference documentation generation
+- README file creation with badges and examples
+- Tutorial and quickstart guide authoring
+- Inline code comment generation
+- Changelog and release notes drafting
+- Architecture diagram descriptions
+
+## Usage
+
+Attach this skill to an agent and point it at a codebase or specific files. The agent will analyze the code structure, extract public interfaces, and produce formatted documentation.
+
+## Output Formats
+
+- **Markdown** - GitHub-compatible README and docs
+- **OpenAPI** - Swagger/OpenAPI spec generation
+- **JSDoc/TSDoc** - Inline documentation comments
+- **Plain text** - Simple reference guides
+`,
+  },
 ];
 
 /**
  * GET /api/skills
- * Returns bundled skills plus any imported GitHub skills stored in SQLite.
+ * Returns bundled skills plus any imported GitHub skills stored in SQLite,
+ * and Anthropic official skills from the Skills API.
  */
 export async function GET() {
   try {
@@ -214,7 +377,47 @@ export async function GET() {
       // SQLite not available or table doesn't exist yet
     }
 
-    return NextResponse.json([...BUNDLED_SKILLS, ...importedSkills]);
+    // Try to fetch Anthropic official skills from the Skills API
+    let anthropicSkills: BundledSkill[] = [];
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (apiKey) {
+        const res = await fetch("https://api.anthropic.com/v1/skills", {
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "managed-agents-2026-04-01",
+          },
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const skills = Array.isArray(data) ? data : data?.data ?? [];
+
+          anthropicSkills = skills.map((skill: Record<string, unknown>) => ({
+            id: `anthropic-${skill.id}`,
+            name: (skill.name as string) || (skill.id as string),
+            description: (skill.description as string) || "",
+            author: "Anthropic",
+            source: "anthropic" as const,
+            category: "Official",
+            content:
+              (skill.content as string) ||
+              (skill.instructions as string) ||
+              JSON.stringify(skill, null, 2),
+            anthropic_skill_id: skill.id as string,
+          }));
+        }
+      }
+    } catch {
+      // Skills API might not be available yet, fall back to bundled only
+    }
+
+    return NextResponse.json([
+      ...BUNDLED_SKILLS,
+      ...anthropicSkills,
+      ...importedSkills,
+    ]);
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to list skills";
