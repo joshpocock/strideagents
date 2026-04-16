@@ -45,7 +45,7 @@ def main():
     agent = client.agents.create(
         name="code-reviewer",
         description="Reviews pull requests for bugs, style issues, and improvement opportunities.",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         system_prompt=(
             "You are a senior software engineer conducting a code review. When given a PR to review:\n\n"
             "1. Clone the repository and check out the PR branch.\n"

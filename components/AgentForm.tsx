@@ -26,10 +26,11 @@ export interface AgentFormData {
   mcp_servers: McpServer[];
 }
 
-const models = [
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+// Fallback models in case the API fetch fails
+const fallbackModels = [
   { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
 ];
 
 const toolsets = [
@@ -58,6 +59,26 @@ export default function AgentForm({
   const [selectedTools, setSelectedTools] = useState<string[]>(
     initialData?.tools?.map((t) => t.type) || ["agent_toolset_20260401"]
   );
+  const [models, setModels] = useState(fallbackModels);
+
+  // Fetch available models from the API
+  useEffect(() => {
+    fetch("/api/models")
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setModels(
+            data.map((m: { id: string; display_name: string }) => ({
+              value: m.id,
+              label: m.display_name,
+            }))
+          );
+        }
+      })
+      .catch(() => {
+        // Keep fallback models
+      });
+  }, []);
   const [mcpServers, setMcpServers] = useState<McpServer[]>(
     initialData?.mcp_servers || []
   );

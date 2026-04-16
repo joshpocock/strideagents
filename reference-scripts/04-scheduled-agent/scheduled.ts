@@ -53,7 +53,7 @@ async function main() {
   const agent = await client.agents.create({
     name: "daily-digest",
     description: "Generates a daily summary of open GitHub issues across repos.",
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     system_prompt: `You are a project manager assistant. When triggered:
 
 1. For each repository provided, search the web for its recent GitHub issues.

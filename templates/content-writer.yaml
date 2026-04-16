@@ -7,7 +7,7 @@
 
 agent:
   name: content-writer
-  model: claude-sonnet-4-20250514
+  model: claude-sonnet-4-6
   description: >
     Researches topics and writes long-form content including
     blog posts, documentation, and technical tutorials.

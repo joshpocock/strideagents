@@ -7,7 +7,7 @@
 
 agent:
   name: data-processor
-  model: claude-sonnet-4-20250514
+  model: claude-sonnet-4-6
   description: >
     Processes CSV and JSON data files, runs analysis,
     generates charts, and writes summary reports.

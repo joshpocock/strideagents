@@ -38,7 +38,7 @@ def main():
     agent = client.agents.create(
         name="deep-researcher",
         description="Searches the web, synthesizes information, and writes structured reports.",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         system_prompt=(
             "You are a research analyst. When given a topic:\n\n"
             "1. Search the web for recent, authoritative sources (at least 5 different searches).\n"

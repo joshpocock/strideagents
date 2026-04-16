@@ -7,7 +7,7 @@
 
 agent:
   name: code-reviewer
-  model: claude-sonnet-4-20250514
+  model: claude-sonnet-4-6
   description: >
     Reviews pull requests for bugs, security vulnerabilities,
     style issues, and improvement opportunities.

@@ -24,7 +24,7 @@ def main():
     agent = client.agents.create(
         name="polyglot-developer",
         description="A developer agent that works in any language environment.",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         system_prompt=(
             "You are a developer assistant. When given a task:\n\n"
             "1. First, inspect your environment: check what languages, "

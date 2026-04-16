@@ -29,7 +29,7 @@ async function main() {
   const agent = await client.agents.create({
     name: "basic-assistant",
     description: "A simple assistant that answers questions and writes files.",
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     system_prompt:
       "You are a helpful assistant. When asked to create files, write them to the /workspace directory. Be concise and direct.",
     // agent_toolset_20260401 gives the agent bash, file ops, web search, and web fetch

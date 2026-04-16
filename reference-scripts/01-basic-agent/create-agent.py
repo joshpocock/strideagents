@@ -30,7 +30,7 @@ def main():
     agent = client.agents.create(
         name="basic-assistant",
         description="A simple assistant that answers questions and writes files.",
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         system_prompt=(
             "You are a helpful assistant. When asked to create files, "
             "write them to the /workspace directory. Be concise and direct."
