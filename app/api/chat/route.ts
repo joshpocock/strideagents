@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getClient } from "@/lib/anthropic";
-import { getChatSession, insertChatSession } from "@/lib/db";
+import {
+  getChatSession,
+  insertChatSession,
+  resolveVaultIdsForAgent,
+  resolveEnvironmentForAgent,
+} from "@/lib/db";
 
 // Allow up to 5 minutes for agent responses
 export const maxDuration = 300;
@@ -35,7 +40,10 @@ export async function POST(request: Request) {
         );
       }
 
-      let resolvedEnvId = environment_id as string | undefined;
+      // Preference order: explicit body override → saved agent default → first
+      // environment we can find on Anthropic.
+      let resolvedEnvId =
+        resolveEnvironmentForAgent(agent_id, environment_id as string | undefined) ?? undefined;
       if (!resolvedEnvId) {
         try {
           const envResp: any = await (client.beta as any).environments.list();
@@ -58,13 +66,8 @@ export async function POST(request: Request) {
         );
       }
 
-      // Include vault IDs for MCP credential access
-      let vaultIds: string[] = [];
-      try {
-        const { getSetting } = await import("@/lib/db");
-        const vaultId = getSetting("mcp_vault_id");
-        if (vaultId) vaultIds = [vaultId];
-      } catch {}
+      // Combine agent-attached vaults with the global tunnel vault fallback.
+      const vaultIds = resolveVaultIdsForAgent(agent_id);
 
       const newSession = await client.beta.sessions.create({
         agent: agent_id,
@@ -192,6 +195,7 @@ export async function POST(request: Request) {
 
     // Fetch the full conversation from replay to get the complete response
     let fullResponse = "";
+    let toolCalls: Array<Record<string, unknown>> = [];
     try {
       const replayRes = await (client.beta as any).sessions.events.list(sessionId);
       const events: any[] = [];
@@ -207,8 +211,12 @@ export async function POST(request: Request) {
         events.push(...replayRes.data);
       }
 
-      // Get the LAST agent message(s) - these are the response to our message
+      // Get the LAST agent message(s) - these are the response to our message.
+      // Also accumulate any tool_use + tool_result events that happened in
+      // that same turn so the client can render them inline.
       const agentMessages: string[] = [];
+      const pendingTools = new Map<string, any>(); // tool_use_id → partial
+      const completedTools: Array<Record<string, unknown>> = [];
       let foundOurMessage = false;
 
       for (const ev of events) {
@@ -218,18 +226,62 @@ export async function POST(request: Request) {
           if (text === message) {
             foundOurMessage = true;
             agentMessages.length = 0; // Reset - only want messages after ours
+            pendingTools.clear();
+            completedTools.length = 0;
           }
         }
-        if (foundOurMessage && ev?.type === "agent.message" && Array.isArray(ev.content)) {
+        if (!foundOurMessage) continue;
+
+        if (ev?.type === "agent.message" && Array.isArray(ev.content)) {
           for (const block of ev.content) {
             if (block?.type === "text" && typeof block.text === "string") {
               agentMessages.push(block.text);
             }
           }
+        } else if (
+          ev?.type === "agent.tool_use" ||
+          ev?.type === "agent.mcp_tool_use"
+        ) {
+          const toolId = ev?.id || ev?.tool_use_id || `tu-${completedTools.length}`;
+          pendingTools.set(toolId, {
+            id: toolId,
+            name: ev?.name || ev?.tool_name || "unknown",
+            input: ev?.input ?? ev?.tool_input ?? null,
+            is_mcp: ev?.type === "agent.mcp_tool_use",
+          });
+        } else if (
+          ev?.type === "agent.tool_result" ||
+          ev?.type === "agent.mcp_tool_result"
+        ) {
+          const tuId = ev?.tool_use_id || ev?.mcp_tool_use_id || ev?.id;
+          const existing = pendingTools.get(tuId);
+          const resultPayload = ev?.content ?? ev?.result ?? null;
+          if (existing) {
+            existing.result = resultPayload;
+            existing.is_error = Boolean(ev?.is_error);
+            completedTools.push(existing);
+            pendingTools.delete(tuId);
+          } else {
+            // Result without a matching pending use (rare) — still log it.
+            completedTools.push({
+              id: tuId || `tr-${completedTools.length}`,
+              name: "tool",
+              result: resultPayload,
+              is_error: Boolean(ev?.is_error),
+            });
+          }
         }
       }
 
+      // Any tool_use left in pending means the matching result didn't arrive
+      // yet (session still running or the poll raced the last event). Surface
+      // them as in-flight entries so the user at least sees the call happened.
+      for (const stillPending of pendingTools.values()) {
+        completedTools.push(stillPending);
+      }
+
       fullResponse = agentMessages.join("\n\n");
+      toolCalls = completedTools;
     } catch (err) {
       console.error("Failed to fetch replay:", err);
     }
@@ -267,6 +319,7 @@ export async function POST(request: Request) {
       chat_id,
       session_id: sessionId,
       response: fullResponse,
+      tool_calls: toolCalls,
     });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : "Chat request failed";

@@ -138,62 +138,66 @@ function CodeWithLineNumbers({
             );
   const gutterWidth = Math.max(2, String(lines.length).length) * 8 + 20;
 
+  // Render each logical line as a grid row with its own gutter cell so when
+  // the code wraps, the row grows as a unit and the number stays aligned with
+  // the FIRST visual line of the wrapped content — matching Claude Console's
+  // behavior. Using separate gutter + code columns would desync on wrap.
   return (
     <div
       style={{
-        display: "flex",
         fontFamily:
           "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
         fontSize: 12.5,
         lineHeight: 1.6,
         color: "var(--text-primary)",
-        overflow: "auto",
+        overflowY: "auto",
+        overflowX: "hidden",
         minHeight: "100%",
+        width: "100%",
+        minWidth: 0,
       }}
     >
-      {/* Gutter */}
-      <div
-        aria-hidden
-        style={{
-          flexShrink: 0,
-          width: gutterWidth,
-          padding: "0 10px 0 4px",
-          textAlign: "right",
-          userSelect: "none",
-          color: "var(--text-muted)",
-          borderRight: "1px solid var(--border-color)",
-          background: "var(--bg-primary)",
-          fontVariantNumeric: "tabular-nums",
-          position: "sticky",
-          left: 0,
-          zIndex: 1,
-        }}
-      >
-        {lines.map((_, i) => (
-          <div key={i} style={{ whiteSpace: "pre" }}>
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          style={{
+            display: "grid",
+            gridTemplateColumns: `${gutterWidth}px 1fr`,
+            minHeight: "1.6em",
+          }}
+        >
+          <div
+            aria-hidden
+            style={{
+              padding: "0 10px 0 4px",
+              textAlign: "right",
+              userSelect: "none",
+              color: "var(--text-muted)",
+              borderRight: "1px solid var(--border-color)",
+              background: "var(--bg-primary)",
+              fontVariantNumeric: "tabular-nums",
+              position: "sticky",
+              left: 0,
+              zIndex: 1,
+              whiteSpace: "pre",
+            }}
+          >
             {i + 1}
           </div>
-        ))}
-      </div>
-
-      {/* Code */}
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          padding: "0 16px",
-        }}
-      >
-        {lines.map((line, i) => (
           <div
-            key={i}
-            style={{ whiteSpace: "pre", minHeight: "1.6em" }}
+            style={{
+              padding: "0 16px",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              minWidth: 0,
+            }}
             dangerouslySetInnerHTML={{
               __html: line.length === 0 ? "&nbsp;" : highlight(line),
             }}
           />
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -258,6 +262,9 @@ export default function QuickstartPage() {
   ]);
   const [testMessage, setTestMessage] = useState("");
   const [descriptionInput, setDescriptionInput] = useState("");
+  const [existingEnvs, setExistingEnvs] = useState<
+    Array<{ id: string; name?: string; archived_at?: string | null }>
+  >([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const [state, setState] = useState<WizardState>({
@@ -280,6 +287,21 @@ export default function QuickstartPage() {
     import("@/lib/templates").then((mod) => {
       setTemplates(mod.TEMPLATES);
     });
+  }, []);
+
+  // Load existing environments so the user can pick one instead of creating new
+  useEffect(() => {
+    fetch("/api/environments")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.data ?? [];
+        setExistingEnvs(
+          list
+            .map((e: any) => ({ id: e.id, name: e.name, archived_at: e.archived_at }))
+            .filter((e: any) => !e.archived_at)
+        );
+      })
+      .catch(() => {});
   }, []);
 
   // Auto-scroll chat
@@ -416,6 +438,43 @@ export default function QuickstartPage() {
   }, [descriptionInput, addChat]);
 
   // ------- Step 2: Environment -------
+
+  const useExistingEnvironment = useCallback(
+    (env: { id: string; name?: string }) => {
+      addChat("user", `Reusing environment ${env.name || env.id}`);
+      setState((prev) => ({
+        ...prev,
+        step: 3,
+        environment: env as any,
+        environmentId: env.id,
+        networking: "limited",
+        config: {
+          ...prev.config,
+          environment_id: env.id,
+        },
+      }));
+      addChat("system", `Using existing environment: ${env.id}`);
+
+      const template = state.selectedTemplate;
+      if (template && template.mcp_servers.length > 0) {
+        addChat(
+          "system",
+          `This agent uses ${template.mcp_servers.length} MCP server(s). Configure credentials below, or skip to start without them.`
+        );
+        const inputs: Record<
+          string,
+          { token: string; vaultId: string; skipped: boolean }
+        > = {};
+        for (const mcp of template.mcp_servers) {
+          inputs[mcp.name] = { token: "", vaultId: "", skipped: false };
+        }
+        setState((prev) => ({ ...prev, credentialInputs: inputs }));
+      } else {
+        addChat("system", 'No MCP credentials needed. Click "Start Session" to continue.');
+      }
+    },
+    [addChat, state.selectedTemplate]
+  );
 
   const createEnvironment = useCallback(
     async (networking: "limited" | "unrestricted") => {
@@ -1066,6 +1125,57 @@ console.log(response);`,
             {/* STEP 2: Environment config */}
             {state.step === 2 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {existingEnvs.length > 0 && (
+                  <div
+                    style={{
+                      padding: "10px 12px",
+                      background: "var(--bg-primary)",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                        color: "var(--text-muted)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Use an existing environment
+                    </div>
+                    <select
+                      defaultValue=""
+                      disabled={loading}
+                      onChange={(e) => {
+                        const env = existingEnvs.find((x) => x.id === e.target.value);
+                        if (env) useExistingEnvironment(env);
+                        e.target.value = "";
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        background: "var(--bg-input)",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: 6,
+                        color: "var(--text-primary)",
+                        fontSize: 13,
+                      }}
+                    >
+                      <option value="">— pick one —</option>
+                      {existingEnvs.map((env) => (
+                        <option key={env.id} value={env.id}>
+                          {env.name ? `${env.name} (${env.id})` : env.id}
+                        </option>
+                      ))}
+                    </select>
+                    <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "6px 0 0" }}>
+                      Or create a new one with one of the options below.
+                    </p>
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 10 }}>
                   <button
                     onClick={() => createEnvironment("limited")}

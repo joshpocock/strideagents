@@ -88,12 +88,54 @@ export function getDb(): Database.Database {
         value TEXT NOT NULL,
         updated_at TEXT DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS agent_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL UNIQUE,
+        environment_id TEXT,
+        prompt TEXT,
+        cron_schedule TEXT NOT NULL,
+        last_fired_at TEXT,
+        last_session_url TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT,
+        status TEXT NOT NULL DEFAULT 'success',
+        session_id TEXT,
+        session_url TEXT,
+        trigger_source TEXT,
+        error TEXT,
+        output_preview TEXT,
+        fired_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_vaults (
+        agent_id TEXT NOT NULL,
+        vault_id TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (agent_id, vault_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_defaults (
+        agent_id TEXT PRIMARY KEY,
+        environment_id TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
     `);
 
     // Best-effort migrations for databases created before a column existed.
     // SQLite lacks "ADD COLUMN IF NOT EXISTS", so we swallow the duplicate error.
     try {
       db.exec("ALTER TABLE routines ADD COLUMN cron_schedule TEXT");
+    } catch {
+      // column already exists
+    }
+    try {
+      db.exec("ALTER TABLE agent_runs ADD COLUMN output_preview TEXT");
     } catch {
       // column already exists
     }
@@ -517,4 +559,260 @@ export function getMcpLogs(opts?: {
   sql += ` LIMIT ${opts?.limit ?? 50}`;
 
   return getDb().prepare(sql).all(params) as McpLog[];
+}
+
+// ---------------------------------------------------------------------------
+// Agent schedule + run helpers
+// ---------------------------------------------------------------------------
+
+export interface AgentSchedule {
+  id: number;
+  agent_id: string;
+  environment_id: string | null;
+  prompt: string | null;
+  cron_schedule: string;
+  last_fired_at: string | null;
+  last_session_url: string | null;
+  created_at: string;
+}
+
+export interface AgentRun {
+  id: number;
+  agent_id: string;
+  agent_name: string | null;
+  status: "success" | "error";
+  session_id: string | null;
+  session_url: string | null;
+  trigger_source: string | null;
+  error: string | null;
+  output_preview: string | null;
+  fired_at: string;
+}
+
+/**
+ * Updates the output_preview field on an agent run. Called by the capture
+ * endpoint after a scheduled or manual trigger once the session has emitted
+ * its first agent text message.
+ */
+export function updateAgentRunOutput(runId: number, preview: string): void {
+  getDb()
+    .prepare("UPDATE agent_runs SET output_preview = @preview WHERE id = @id")
+    .run({ id: runId, preview });
+}
+
+/**
+ * Returns the agent_id + session_id for a run so the capture endpoint knows
+ * which session to poll.
+ */
+export function getAgentRun(runId: number): AgentRun | undefined {
+  return getDb()
+    .prepare("SELECT * FROM agent_runs WHERE id = ?")
+    .get(runId) as AgentRun | undefined;
+}
+
+export function getAgentSchedules(): AgentSchedule[] {
+  return getDb()
+    .prepare("SELECT * FROM agent_schedules ORDER BY created_at DESC")
+    .all() as AgentSchedule[];
+}
+
+export function getAgentSchedule(agentId: string): AgentSchedule | undefined {
+  return getDb()
+    .prepare("SELECT * FROM agent_schedules WHERE agent_id = ?")
+    .get(agentId) as AgentSchedule | undefined;
+}
+
+export function upsertAgentSchedule(row: {
+  agent_id: string;
+  cron_schedule: string;
+  environment_id?: string | null;
+  prompt?: string | null;
+}): AgentSchedule {
+  getDb()
+    .prepare(
+      `INSERT INTO agent_schedules (agent_id, environment_id, prompt, cron_schedule)
+       VALUES (@agent_id, @environment_id, @prompt, @cron_schedule)
+       ON CONFLICT(agent_id) DO UPDATE SET
+         environment_id = excluded.environment_id,
+         prompt = excluded.prompt,
+         cron_schedule = excluded.cron_schedule`
+    )
+    .run({
+      agent_id: row.agent_id,
+      environment_id: row.environment_id ?? null,
+      prompt: row.prompt ?? null,
+      cron_schedule: row.cron_schedule,
+    });
+  return getAgentSchedule(row.agent_id)!;
+}
+
+export function deleteAgentSchedule(agentId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_schedules WHERE agent_id = ?")
+    .run(agentId);
+  return result.changes > 0;
+}
+
+export function updateAgentScheduleLastFired(
+  agentId: string,
+  lastFiredAt: string,
+  lastSessionUrl: string
+): void {
+  getDb()
+    .prepare(
+      "UPDATE agent_schedules SET last_fired_at = @last_fired_at, last_session_url = @last_session_url WHERE agent_id = @agent_id"
+    )
+    .run({
+      agent_id: agentId,
+      last_fired_at: lastFiredAt,
+      last_session_url: lastSessionUrl,
+    });
+}
+
+export function logAgentRun(run: {
+  agent_id: string;
+  agent_name?: string | null;
+  status: "success" | "error";
+  session_id?: string | null;
+  session_url?: string | null;
+  trigger_source?: string | null;
+  error?: string | null;
+}): number {
+  const info = getDb()
+    .prepare(
+      `INSERT INTO agent_runs (agent_id, agent_name, status, session_id, session_url, trigger_source, error)
+       VALUES (@agent_id, @agent_name, @status, @session_id, @session_url, @trigger_source, @error)`
+    )
+    .run({
+      agent_id: run.agent_id,
+      agent_name: run.agent_name ?? null,
+      status: run.status,
+      session_id: run.session_id ?? null,
+      session_url: run.session_url ?? null,
+      trigger_source: run.trigger_source ?? null,
+      error: run.error ?? null,
+    });
+  return info.lastInsertRowid as number;
+}
+
+// ---------------------------------------------------------------------------
+// Agent → Vault attachment helpers
+// ---------------------------------------------------------------------------
+// Anthropic's Managed Agents API accepts vault credentials only at the session
+// layer (`vault_ids` on sessions.create), not on the agent itself. We keep a
+// local join table so each agent can declare which vaults its runtime needs,
+// and the session-creation endpoints call resolveVaultIdsForAgent() to include
+// them automatically.
+
+export function getAgentVaultIds(agentId: string): string[] {
+  const rows = getDb()
+    .prepare("SELECT vault_id FROM agent_vaults WHERE agent_id = ?")
+    .all(agentId) as Array<{ vault_id: string }>;
+  return rows.map((r) => r.vault_id);
+}
+
+export function attachAgentVault(agentId: string, vaultId: string): void {
+  getDb()
+    .prepare(
+      "INSERT OR IGNORE INTO agent_vaults (agent_id, vault_id) VALUES (?, ?)"
+    )
+    .run(agentId, vaultId);
+}
+
+export function detachAgentVault(agentId: string, vaultId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_vaults WHERE agent_id = ? AND vault_id = ?")
+    .run(agentId, vaultId);
+  return result.changes > 0;
+}
+
+/**
+ * Resolve all vault IDs that should be attached when creating a session for
+ * the given agent. Combines:
+ *   - Per-agent vault attachments (the join table)
+ *   - The global `mcp_vault_id` setting (the tunnel MCP credential), so
+ *     existing setups that predate the join table keep working.
+ * De-duped.
+ */
+export function resolveVaultIdsForAgent(agentId: string): string[] {
+  const ids = new Set<string>(getAgentVaultIds(agentId));
+  const tunnelVault = getSetting("mcp_vault_id");
+  if (tunnelVault) ids.add(tunnelVault);
+  return Array.from(ids);
+}
+
+// ---------------------------------------------------------------------------
+// Agent runtime defaults — env + vaults we auto-supply whenever a session is
+// created (chat, board, trigger, scheduler). Callers can still override per
+// request; these are just the baseline so you don't pick them every time.
+// ---------------------------------------------------------------------------
+
+export interface AgentDefaults {
+  agent_id: string;
+  environment_id: string | null;
+  updated_at: string;
+}
+
+export function getAgentDefaults(agentId: string): AgentDefaults | undefined {
+  return getDb()
+    .prepare("SELECT * FROM agent_defaults WHERE agent_id = ?")
+    .get(agentId) as AgentDefaults | undefined;
+}
+
+export function setAgentDefaults(
+  agentId: string,
+  patch: { environment_id?: string | null }
+): AgentDefaults {
+  getDb()
+    .prepare(
+      `INSERT INTO agent_defaults (agent_id, environment_id, updated_at)
+       VALUES (@agent_id, @environment_id, datetime('now'))
+       ON CONFLICT(agent_id) DO UPDATE SET
+         environment_id = excluded.environment_id,
+         updated_at = excluded.updated_at`
+    )
+    .run({
+      agent_id: agentId,
+      environment_id: patch.environment_id ?? null,
+    });
+  return getAgentDefaults(agentId)!;
+}
+
+/**
+ * Resolve the environment id to use for a session. Preference order:
+ *   1. Explicit override passed by the caller
+ *   2. Per-agent default (agent_defaults)
+ * Returns null if neither is set — callers should treat that as a hard error.
+ */
+export function resolveEnvironmentForAgent(
+  agentId: string,
+  override?: string | null
+): string | null {
+  if (override && override.trim()) return override.trim();
+  const def = getAgentDefaults(agentId);
+  return def?.environment_id ?? null;
+}
+
+export function getAgentRuns(opts?: {
+  agentId?: string;
+  since?: string;
+  limit?: number;
+}): AgentRun[] {
+  let sql = "SELECT * FROM agent_runs WHERE 1=1";
+  const params: Record<string, unknown> = {};
+
+  if (opts?.agentId) {
+    sql += " AND agent_id = @agent_id";
+    params.agent_id = opts.agentId;
+  }
+  if (opts?.since) {
+    sql += " AND fired_at >= @since";
+    params.since = opts.since;
+  }
+  sql += " ORDER BY fired_at DESC";
+  if (opts?.limit) {
+    sql += ` LIMIT ${opts.limit}`;
+  }
+
+  return getDb().prepare(sql).all(params) as AgentRun[];
 }

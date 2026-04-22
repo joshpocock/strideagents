@@ -8,9 +8,14 @@ interface ModalProps {
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
+  /**
+   * Max width of the modal content. Accepts a number (px) or CSS string.
+   * Defaults to 560 — use a larger value for dense forms like the agent editor.
+   */
+  maxWidth?: number | string;
 }
 
-export default function Modal({ open, onClose, title, children }: ModalProps) {
+export default function Modal({ open, onClose, title, children, maxWidth = 560 }: ModalProps) {
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -50,9 +55,9 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
           borderRadius: 12,
           padding: 24,
           minWidth: 400,
-          maxWidth: 560,
-          width: "90%",
-          maxHeight: "80vh",
+          maxWidth,
+          width: "92%",
+          maxHeight: "88vh",
           overflowY: "auto",
           position: "relative",
         }}

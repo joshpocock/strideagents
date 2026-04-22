@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getClient } from "@/lib/anthropic";
+import { resolveVaultIdsForAgent, resolveEnvironmentForAgent } from "@/lib/db";
 
 /**
  * GET /api/sessions
@@ -53,9 +54,21 @@ export async function POST(request: Request) {
     }
 
     const client = getClient();
+    const vaultIds = resolveVaultIdsForAgent(agent_id);
+    const envId = resolveEnvironmentForAgent(agent_id, environment_id);
+    if (!envId) {
+      return NextResponse.json(
+        {
+          error:
+            "environment_id is required — pass in body or save one on the agent's Runtime defaults.",
+        },
+        { status: 400 }
+      );
+    }
     const session = await client.beta.sessions.create({
       agent: agent_id,
-      ...(environment_id && { environment_id }),
+      environment_id: envId,
+      ...(vaultIds.length > 0 && { vault_ids: vaultIds }),
     });
 
     return NextResponse.json(session, { status: 201 });

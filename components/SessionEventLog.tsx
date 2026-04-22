@@ -45,13 +45,66 @@ export default function SessionEventLog({
     source.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        let type = data.type || "unknown";
+        const rawType = data.type || "unknown";
+        let type: string = "unknown";
         let text = "";
 
-        if (type === "content_block_start" && data.content_block?.type === "tool_use") {
+        // Managed Agents event shapes (primary — what board streams today)
+        if (rawType === "agent.message" && Array.isArray(data.content)) {
+          type = "text_delta";
+          text = data.content
+            .filter((b: any) => b?.type === "text" && typeof b.text === "string")
+            .map((b: any) => b.text)
+            .join("");
+          if (!text) return;
+        } else if (
+          rawType === "agent.tool_use" ||
+          rawType === "agent.mcp_tool_use" ||
+          rawType === "agent.custom_tool_use"
+        ) {
+          type = "tool_use";
+          const name = data.name || data.tool_name || "tool";
+          text = `Using tool: ${name}`;
+        } else if (
+          rawType === "agent.tool_result" ||
+          rawType === "agent.mcp_tool_result"
+        ) {
+          type = "tool_use";
+          const summary = Array.isArray(data.content)
+            ? (data.content.find((b: any) => b?.type === "text")?.text ?? "result")
+            : "result";
+          text = `Tool result: ${String(summary).slice(0, 120)}`;
+        } else if (rawType === "agent.thinking") {
+          type = "status";
+          text = "Agent thinking…";
+        } else if (rawType === "session.status_running") {
+          type = "status";
+          text = "Session running";
+        } else if (rawType === "session.status_idle") {
+          type = "status";
+          text = "Session idle";
+        } else if (rawType === "session.status_terminated") {
+          type = "status";
+          text = "Session terminated";
+        } else if (rawType === "session.error" || rawType === "error") {
+          type = "error";
+          text =
+            data.error?.message ||
+            data.message ||
+            "Session error";
+        } else if (rawType === "task_status") {
+          type = "status";
+          text = `Task ${data.status || "started"}`;
+        } else if (rawType === "task_complete") {
+          type = "status";
+          text = `Task ${data.status || "done"}`;
+        }
+
+        // Fall back for legacy Messages-API shapes (older flows / local testing)
+        else if (rawType === "content_block_start" && data.content_block?.type === "tool_use") {
           type = "tool_use";
           text = `Using tool: ${data.content_block.name}`;
-        } else if (type === "content_block_delta") {
+        } else if (rawType === "content_block_delta") {
           if (data.delta?.type === "text_delta") {
             type = "text_delta";
             text = data.delta.text || "";
@@ -61,12 +114,11 @@ export default function SessionEventLog({
           } else {
             return;
           }
-        } else if (type === "message_start" || type === "message_stop") {
+        } else if (rawType === "message_start" || rawType === "message_stop") {
           type = "status";
-          text = type === "message_start" ? "Agent started" : "Agent finished";
-        } else if (type === "error") {
-          text = data.error?.message || "Unknown error";
+          text = rawType === "message_start" ? "Agent started" : "Agent finished";
         } else {
+          // Unknown type — skip.
           return;
         }
 

@@ -45,8 +45,43 @@ export default function VaultDetailPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Credential context menu
+  // Credential context menu — positioned with fixed coords so it escapes the
+  // credentials card's `overflow: hidden` clipping.
   const [menuCredId, setMenuCredId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Credential delete confirmation
+  const [credDeleteConfirm, setCredDeleteConfirm] = useState<Credential | null>(null);
+  const [credDeleting, setCredDeleting] = useState(false);
+
+  // Credential details / edit modal
+  const [editCred, setEditCred] = useState<Credential | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editMcpUrl, setEditMcpUrl] = useState("");
+  const [editToken, setEditToken] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditCred = (cred: Credential) => {
+    setEditCred(cred);
+    setEditDisplayName(cred.display_name || "");
+    setEditMcpUrl(cred.auth?.mcp_server_url || "");
+    setEditToken("");
+  };
+
+  // Close menu on outside click or Escape
+  useEffect(() => {
+    if (!menuCredId) return;
+    const onClickAway = () => setMenuCredId(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuCredId(null);
+    };
+    window.addEventListener("click", onClickAway);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onClickAway);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuCredId]);
 
   // Credential filter
   const [credTab, setCredTab] = useState<CredFilterTab>("all");
@@ -637,9 +672,20 @@ export default function VaultDetailPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setMenuCredId(
-                            menuCredId === cred.id ? null : cred.id
-                          );
+                          if (menuCredId === cred.id) {
+                            setMenuCredId(null);
+                            return;
+                          }
+                          const rect = (
+                            e.currentTarget as HTMLElement
+                          ).getBoundingClientRect();
+                          // Anchor the menu below the button, right-aligned to
+                          // the trigger so it doesn't run off-screen.
+                          setMenuPos({
+                            top: rect.bottom + 4,
+                            left: rect.right - 160,
+                          });
+                          setMenuCredId(cred.id);
                         }}
                         style={{
                           background: "none",
@@ -662,23 +708,28 @@ export default function VaultDetailPage() {
                       >
                         <MoreHorizontal size={16} />
                       </button>
-                      {menuCredId === cred.id && (
+                      {menuCredId === cred.id && menuPos && (
                         <div
+                          onClick={(e) => e.stopPropagation()}
                           style={{
-                            position: "absolute",
-                            right: 16,
-                            top: "100%",
+                            position: "fixed",
+                            top: menuPos.top,
+                            left: menuPos.left,
                             background: "var(--bg-card)",
                             border: "1px solid var(--border-color)",
                             borderRadius: 8,
                             padding: 4,
-                            minWidth: 140,
-                            zIndex: 10,
+                            minWidth: 160,
+                            zIndex: 1000,
                             boxShadow:
                               "0 4px 12px rgba(0, 0, 0, 0.3)",
                           }}
                         >
                           <button
+                            onClick={() => {
+                              setMenuCredId(null);
+                              openEditCred(cred);
+                            }}
                             style={{
                               display: "block",
                               width: "100%",
@@ -699,9 +750,13 @@ export default function VaultDetailPage() {
                               e.currentTarget.style.background = "none";
                             }}
                           >
-                            View details
+                            View / edit details
                           </button>
                           <button
+                            onClick={() => {
+                              setMenuCredId(null);
+                              setCredDeleteConfirm(cred);
+                            }}
                             style={{
                               display: "block",
                               width: "100%",
@@ -1008,6 +1063,242 @@ export default function VaultDetailPage() {
           </button>
         </div>
       </Modal>
+
+      {/* Edit Credential Modal */}
+      <Modal
+        open={editCred !== null}
+        onClose={() => setEditCred(null)}
+        title="Credential details"
+      >
+        {editCred && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={credLabelStyle}>Credential ID</label>
+              <code
+                style={{
+                  display: "block",
+                  padding: "8px 10px",
+                  background: "var(--bg-input)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  wordBreak: "break-all",
+                }}
+              >
+                {editCred.id}
+              </code>
+            </div>
+            <div>
+              <label style={credLabelStyle}>Auth type</label>
+              <code
+                style={{
+                  display: "block",
+                  padding: "8px 10px",
+                  background: "var(--bg-input)",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                }}
+              >
+                {editCred.auth?.type || "unknown"}
+              </code>
+            </div>
+            <div>
+              <label style={credLabelStyle}>Display name</label>
+              <input
+                value={editDisplayName}
+                onChange={(e) => setEditDisplayName(e.target.value)}
+                placeholder="Human-readable name"
+                style={credInputStyle}
+              />
+            </div>
+            <div>
+              <label style={credLabelStyle}>MCP server URL</label>
+              <input
+                value={editMcpUrl}
+                onChange={(e) => setEditMcpUrl(e.target.value)}
+                placeholder="https://mcp.example.com/mcp"
+                style={{ ...credInputStyle, fontFamily: "monospace", fontSize: 12 }}
+              />
+              <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0" }}>
+                Used by the agent editor's "Add from vault" dropdown. Leave
+                blank for non-MCP credentials.
+              </p>
+            </div>
+            <div>
+              <label style={credLabelStyle}>
+                {editCred.auth?.type === "bearer" ? "Rotate bearer token" : "Rotate token"}
+              </label>
+              <input
+                type="password"
+                value={editToken}
+                onChange={(e) => setEditToken(e.target.value)}
+                placeholder="Leave blank to keep current token"
+                style={{ ...credInputStyle, fontFamily: "monospace", fontSize: 12 }}
+              />
+              <p style={{ fontSize: 11, color: "var(--text-muted)", margin: "4px 0 0" }}>
+                Tokens are never sent back to the browser. Only fill this to
+                replace the existing token.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button
+                onClick={() => setEditCred(null)}
+                className="btn-secondary"
+                style={{ padding: "8px 16px", fontSize: 13 }}
+                disabled={editSaving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!editCred) return;
+                  setEditSaving(true);
+                  try {
+                    const body: Record<string, unknown> = {};
+                    if (editDisplayName !== editCred.display_name) {
+                      body.display_name = editDisplayName.trim();
+                    }
+                    const currentMcp = editCred.auth?.mcp_server_url || "";
+                    const wantsMcpChange = editMcpUrl !== currentMcp;
+                    const wantsTokenChange = editToken.trim().length > 0;
+                    if (wantsMcpChange || wantsTokenChange) {
+                      body.auth = {
+                        type: editCred.auth?.type || "bearer",
+                        ...(wantsTokenChange && { token: editToken.trim() }),
+                        ...(wantsMcpChange && {
+                          mcp_server_url: editMcpUrl.trim() || null,
+                        }),
+                      };
+                    }
+                    if (Object.keys(body).length === 0) {
+                      setEditCred(null);
+                      return;
+                    }
+                    const res = await fetch(
+                      `/api/vaults/${vaultId}/credentials/${editCred.id}`,
+                      {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                      }
+                    );
+                    if (res.ok) {
+                      const updated = await res.json();
+                      setCredentials((prev) =>
+                        prev.map((c) => (c.id === editCred.id ? { ...c, ...updated } : c))
+                      );
+                      showToast("Credential updated", "success");
+                      setEditCred(null);
+                    } else {
+                      const err = await res.json().catch(() => ({}));
+                      showToast(err.error || "Update failed", "error");
+                    }
+                  } catch {
+                    showToast("Network error while saving", "error");
+                  } finally {
+                    setEditSaving(false);
+                  }
+                }}
+                disabled={editSaving}
+                className="btn-primary"
+                style={{ padding: "8px 16px", fontSize: 13 }}
+              >
+                {editSaving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Delete Credential Modal */}
+      <Modal
+        open={credDeleteConfirm !== null}
+        onClose={() => setCredDeleteConfirm(null)}
+        title="Delete credential"
+      >
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            marginBottom: 20,
+            fontSize: 14,
+          }}
+        >
+          Delete <strong>{credDeleteConfirm?.display_name}</strong> from{" "}
+          <strong>{vault.name}</strong>? Any agent session that was relying on
+          this credential will stop authenticating. This action cannot be
+          undone.
+        </p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            onClick={() => setCredDeleteConfirm(null)}
+            className="btn-secondary"
+            style={{ padding: "8px 16px", fontSize: 13 }}
+            disabled={credDeleting}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={async () => {
+              if (!credDeleteConfirm) return;
+              setCredDeleting(true);
+              try {
+                const res = await fetch(
+                  `/api/vaults/${vaultId}/credentials/${credDeleteConfirm.id}`,
+                  { method: "DELETE" }
+                );
+                if (res.ok) {
+                  setCredentials((prev) =>
+                    prev.filter((c) => c.id !== credDeleteConfirm.id)
+                  );
+                  showToast("Credential deleted", "success");
+                  setCredDeleteConfirm(null);
+                } else {
+                  const err = await res.json().catch(() => ({}));
+                  showToast(err.error || "Delete failed", "error");
+                }
+              } catch {
+                showToast("Network error while deleting", "error");
+              } finally {
+                setCredDeleting(false);
+              }
+            }}
+            disabled={credDeleting}
+            style={{
+              background: "var(--error)",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: 8,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: credDeleting ? 0.6 : 1,
+              cursor: "pointer",
+            }}
+          >
+            {credDeleting ? "Deleting..." : "Delete credential"}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
+
+const credLabelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "var(--text-secondary)",
+  marginBottom: 6,
+};
+
+const credInputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  background: "var(--bg-input)",
+  border: "1px solid var(--border-color)",
+  borderRadius: 6,
+  color: "var(--text-primary)",
+  fontSize: 13,
+  outline: "none",
+};

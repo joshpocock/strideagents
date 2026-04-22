@@ -135,10 +135,22 @@ export interface ChatSession {
 // Chat types
 // ---------------------------------------------------------------------------
 
+export interface ToolCallEvent {
+  id: string;
+  name: string;
+  input?: unknown;
+  result?: unknown;
+  is_error?: boolean;
+  /** True for MCP tool calls (agent.mcp_tool_use) vs built-in tools. */
+  is_mcp?: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
+  /** Tool calls the agent made while producing this assistant message. */
+  tool_calls?: ToolCallEvent[];
 }
 
 // ---------------------------------------------------------------------------

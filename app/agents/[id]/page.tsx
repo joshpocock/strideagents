@@ -26,6 +26,8 @@ import AgentEditor, { type AgentConfig } from "@/components/AgentEditor";
 import Modal from "@/components/Modal";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
 import TunnelBanner from "@/components/TunnelBanner";
+import AgentScheduleSection from "@/components/AgentScheduleSection";
+import AgentRuntimeDefaults from "@/components/AgentRuntimeDefaults";
 import { useToast } from "@/components/Toast";
 
 interface AgentVersion extends Agent {
@@ -489,11 +491,13 @@ export default function AgentDetailPage() {
         open={editing}
         onClose={() => setEditing(false)}
         title="Edit agent"
+        maxWidth={1100}
       >
         <AgentEditor
           initialData={displayed}
           onSubmit={handleUpdate}
           submitLabel="Save new version"
+          agentId={agentId}
         />
       </Modal>
 
@@ -570,6 +574,7 @@ function AgentTab({
   const { showToast } = useToast();
   const [skills, setSkills] = useState<Array<{ type: string; skill_id: string; version?: string; display_title?: string }>>([]);
   const [skillsLoading, setSkillsLoading] = useState(true);
+  const [environments, setEnvironments] = useState<Array<{ id: string; name?: string }>>([]);
 
   // Routines state
   const [connectedRoutines, setConnectedRoutines] = useState<Array<{
@@ -588,6 +593,17 @@ function AgentTab({
       .then((data) => setSkills(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setSkillsLoading(false));
+
+    // Environments — used by the Schedule section's dropdown.
+    fetch("/api/environments")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.data ?? [];
+        setEnvironments(
+          list.map((e: any) => ({ id: e.id, name: e.name }))
+        );
+      })
+      .catch(() => {});
 
     // Fetch connected routines + all routines
     Promise.all([
@@ -1164,6 +1180,35 @@ function AgentTab({
             ))}
           </div>
         )}
+      </Section>
+
+      {/* Runtime defaults (env + vaults) */}
+      <Section title="Runtime defaults (env + vaults)">
+        <AgentRuntimeDefaults
+          agentId={agentId}
+          mcpServers={displayed.mcp_servers as Array<{ name?: string; url?: string }> | undefined}
+        />
+      </Section>
+
+      {/* Scheduling + API trigger */}
+      <Section title="Schedule & API trigger">
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-secondary)",
+            margin: "0 0 14px",
+            lineHeight: 1.5,
+          }}
+        >
+          Fire this agent on a cron, via the Run now button, or by POSTing to the
+          trigger endpoint from any external system. Each fire starts a new
+          session. Metered at standard Managed Agents pricing (~$0.08/session-hour
+          + tokens) — there is no daily cap, but runs do cost money.
+        </p>
+        <AgentScheduleSection
+          agentId={agentId}
+          availableEnvironments={environments}
+        />
       </Section>
 
       {/* Routines */}

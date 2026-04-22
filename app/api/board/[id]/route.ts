@@ -42,8 +42,14 @@ export async function PATCH(
       const client = getClient();
 
       // environment_id is required. Try the request, the task, or fall back to
-      // the first non-archived environment.
-      let effectiveEnvId = environment_id || task.environment_id;
+      // Preference order: explicit body → task row → agent Runtime default →
+      // first non-archived environment on Anthropic.
+      const { resolveEnvironmentForAgent } = await import("@/lib/db");
+      let effectiveEnvId =
+        resolveEnvironmentForAgent(
+          effectiveAgentId,
+          environment_id || task.environment_id
+        ) ?? undefined;
       if (!effectiveEnvId) {
         try {
           const envResp: any = await (client.beta as any).environments.list();
@@ -63,13 +69,9 @@ export async function PATCH(
         );
       }
 
-      // Include vault IDs for MCP credential access
-      let vaultIds: string[] = [];
-      try {
-        const { getSetting } = await import("@/lib/db");
-        const vaultId = getSetting("mcp_vault_id");
-        if (vaultId) vaultIds = [vaultId];
-      } catch {}
+      // Combine agent-attached vaults with the global tunnel vault fallback.
+      const { resolveVaultIdsForAgent } = await import("@/lib/db");
+      const vaultIds = resolveVaultIdsForAgent(effectiveAgentId);
 
       const session = await client.beta.sessions.create({
         agent: effectiveAgentId,
@@ -210,12 +212,8 @@ async function runAgentTask(
 
         // Create a new session without the broken MCP and retry
         const task = getTask(taskId);
-        let retryVaultIds: string[] = [];
-        try {
-          const { getSetting } = await import("@/lib/db");
-          const vid = getSetting("mcp_vault_id");
-          if (vid) retryVaultIds = [vid];
-        } catch {}
+        const { resolveVaultIdsForAgent } = await import("@/lib/db");
+        const retryVaultIds = resolveVaultIdsForAgent(agentId);
         const newSession = await client.beta.sessions.create({
           agent: agentId,
           environment_id: task?.environment_id || (agent as any).environment_id,

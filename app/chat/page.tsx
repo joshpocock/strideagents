@@ -15,9 +15,10 @@ import {
   Copy,
   Check,
 } from "lucide-react";
-import type { Agent, ChatMessage, Environment } from "@/lib/types";
+import type { Agent, ChatMessage, Environment, ToolCallEvent } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import Markdown from "@/components/Markdown";
+import ToolCallCard from "@/components/ToolCallCard";
 
 function generateId(): string {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -117,23 +118,62 @@ export default function ChatPage() {
         .then((data) => {
           if (!data?.events) return;
           const hist: ChatMessage[] = [];
+          // Tool calls attach to the next agent.message that follows them.
+          let pendingToolCalls: ToolCallEvent[] = [];
+          const pendingToolUses = new Map<string, ToolCallEvent>();
           for (const ev of data.events as Array<{
             rawType: string;
             description?: string;
             timestamp?: string;
+            detail?: Record<string, unknown>;
           }>) {
-            if (ev.rawType === "user.message") {
+            const rt = ev.rawType;
+            const detail = ev.detail ?? {};
+            if (rt === "user.message") {
               hist.push({
                 role: "user",
                 content: ev.description || "",
                 timestamp: ev.timestamp,
               });
-            } else if (ev.rawType === "agent.message") {
+              pendingToolCalls = [];
+              pendingToolUses.clear();
+            } else if (rt === "agent.message") {
               hist.push({
                 role: "assistant",
                 content: ev.description || "",
                 timestamp: ev.timestamp,
+                tool_calls: pendingToolCalls.length ? pendingToolCalls : undefined,
               });
+              pendingToolCalls = [];
+              pendingToolUses.clear();
+            } else if (rt === "agent.tool_use" || rt === "agent.mcp_tool_use") {
+              const id =
+                (detail.id as string) ||
+                (detail.tool_use_id as string) ||
+                `tu-${pendingToolCalls.length}`;
+              const call: ToolCallEvent = {
+                id,
+                name:
+                  (detail.name as string) ||
+                  (detail.tool_name as string) ||
+                  "unknown",
+                input: (detail.input as unknown) ?? (detail.tool_input as unknown) ?? null,
+                is_mcp: rt === "agent.mcp_tool_use",
+              };
+              pendingToolCalls.push(call);
+              pendingToolUses.set(id, call);
+            } else if (rt === "agent.tool_result" || rt === "agent.mcp_tool_result") {
+              const tuId =
+                (detail.tool_use_id as string) ||
+                (detail.mcp_tool_use_id as string) ||
+                (detail.id as string);
+              const existing = tuId ? pendingToolUses.get(tuId) : undefined;
+              const resultPayload =
+                (detail.content as unknown) ?? (detail.result as unknown) ?? null;
+              if (existing) {
+                existing.result = resultPayload;
+                existing.is_error = Boolean(detail.is_error);
+              }
             }
           }
           setMessages(hist);
@@ -261,6 +301,9 @@ export default function ChatPage() {
         role: "assistant",
         content: data.response || data.text || JSON.stringify(data),
         timestamp: new Date().toISOString(),
+        tool_calls: Array.isArray(data.tool_calls)
+          ? (data.tool_calls as ToolCallEvent[])
+          : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
@@ -730,36 +773,45 @@ export default function ChatPage() {
               }}
             >
               <div style={{ maxWidth: "70%" }}>
-                <div
-                  style={{
-                    padding: "12px 16px",
-                    borderTopLeftRadius: 12,
-                    borderTopRightRadius: 12,
-                    borderBottomLeftRadius: msg.role === "user" ? 12 : 4,
-                    borderBottomRightRadius: msg.role === "user" ? 4 : 12,
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    wordBreak: "break-word",
-                    ...(msg.role === "user"
-                      ? {
-                          background: "var(--accent)",
-                          color: "#FFFFFF",
-                          whiteSpace: "pre-wrap" as const,
-                        }
-                      : {
-                          background: "var(--bg-card)",
-                          border: "1px solid var(--border-color)",
-                          color: "var(--text-primary)",
-                        }),
-                  }}
-                >
-                  {msg.role === "assistant" ? (
-                    <Markdown content={msg.content} />
-                  ) : (
-                    msg.content
-                  )}
-                </div>
-                {msg.role === "assistant" && (
+                {msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    {msg.tool_calls.map((call) => (
+                      <ToolCallCard key={call.id} call={call} />
+                    ))}
+                  </div>
+                )}
+                {msg.content && msg.content.trim() && (
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderTopLeftRadius: 12,
+                      borderTopRightRadius: 12,
+                      borderBottomLeftRadius: msg.role === "user" ? 12 : 4,
+                      borderBottomRightRadius: msg.role === "user" ? 4 : 12,
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                      wordBreak: "break-word",
+                      ...(msg.role === "user"
+                        ? {
+                            background: "var(--accent)",
+                            color: "#FFFFFF",
+                            whiteSpace: "pre-wrap" as const,
+                          }
+                        : {
+                            background: "var(--bg-card)",
+                            border: "1px solid var(--border-color)",
+                            color: "var(--text-primary)",
+                          }),
+                    }}
+                  >
+                    {msg.role === "assistant" ? (
+                      <Markdown content={msg.content} />
+                    ) : (
+                      msg.content
+                    )}
+                  </div>
+                )}
+                {msg.role === "assistant" && msg.content && (
                   <CopyButton text={msg.content} />
                 )}
               </div>

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Local routine scheduler.
+ * Local scheduler for routines and agents.
  *
- * Polls /api/routines every SYNC_INTERVAL_MS, registers each routine that has
- * a cron_schedule with node-cron, and fires it on tick by POSTing to the same
- * endpoint the UI uses. Reconciles on every poll so UI-edited schedules take
- * effect without restarting the worker.
+ * Every SYNC_INTERVAL_MS it polls /api/routines and /api/agents/schedules,
+ * registers any entry that has a cron_schedule with node-cron, and fires on
+ * tick by POSTing to the same endpoints the UI uses. Reconciles on every poll
+ * so UI edits take effect without restarting the worker.
  *
  * Usage: node scripts/scheduler.mjs
  */
@@ -18,9 +18,10 @@ let LOCAL_URL = process.env.LOCAL_URL || `http://localhost:${START_PORT}`;
 const SYNC_INTERVAL_MS = 30_000;
 const READY_TIMEOUT_MS = 60_000;
 
-// Tracks live node-cron tasks keyed by routine id, with the schedule string
-// we registered them under so we can detect changes.
-const active = new Map(); // id -> { schedule, task }
+// Tracks live node-cron tasks. Keys are namespaced ("routine:<id>" or
+// "agent:<agentId>") so routines and agents never collide; the value records
+// the schedule string we registered with so we can detect UI-side changes.
+const active = new Map(); // key -> { schedule, task, label }
 
 async function findDevServer() {
   // Try ports from START_PORT to START_PORT+20 to find a running dev server
@@ -69,14 +70,67 @@ async function fireRoutine(routine) {
     });
     if (!res.ok) {
       const txt = await res.text();
-      console.error(`  ✗ [${routine.name}] fire failed (${res.status}): ${txt.slice(0, 200)}`);
+      console.error(`  ✗ [routine ${routine.name}] fire failed (${res.status}): ${txt.slice(0, 200)}`);
       return;
     }
     const data = await res.json();
     const url = data.last_session_url || data.claude_code_session_url || "";
-    console.log(`  ✓ [${routine.name}] fired${url ? ` → ${url}` : ""}`);
+    console.log(`  ✓ [routine ${routine.name}] fired${url ? ` → ${url}` : ""}`);
   } catch (err) {
-    console.error(`  ✗ [${routine.name}] fire errored:`, err.message);
+    console.error(`  ✗ [routine ${routine.name}] fire errored:`, err.message);
+  }
+}
+
+async function fireAgent(schedule) {
+  const label = schedule.agent_name || schedule.agent_id;
+  try {
+    const res = await fetch(`${LOCAL_URL}/api/agents/${schedule.agent_id}/trigger`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trigger_source: "scheduler",
+        environment_id: schedule.environment_id || undefined,
+        prompt: schedule.prompt || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error(`  ✗ [agent ${label}] trigger failed (${res.status}): ${txt.slice(0, 200)}`);
+      return;
+    }
+    const data = await res.json();
+    const url = data.session_url || "";
+    console.log(`  ✓ [agent ${label}] triggered${url ? ` → ${url}` : ""}`);
+
+    // After the trigger returns, give the session some time to produce output
+    // and then ask the app to snapshot the last agent message into
+    // agent_runs.output_preview. Retries a couple times since the first agent
+    // message can take 30–90s to arrive.
+    if (data.run_id) {
+      captureOutputLater(data.run_id, label, [45_000, 90_000, 150_000]);
+    }
+  } catch (err) {
+    console.error(`  ✗ [agent ${label}] trigger errored:`, err.message);
+  }
+}
+
+function captureOutputLater(runId, label, delays) {
+  for (const delay of delays) {
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`${LOCAL_URL}/api/agent-runs/${runId}/capture`, {
+          method: "POST",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.captured) {
+            console.log(`  • [agent ${label}] captured output (${data.chars} chars)`);
+          }
+        }
+      } catch {
+        // best effort — dev server may be restarting
+      }
+    }, delay);
   }
 }
 
@@ -93,53 +147,91 @@ async function writeHeartbeat() {
 }
 
 async function sync() {
-  let routines;
+  let routines = [];
+  let agentSchedules = [];
+
   try {
     const res = await fetch(`${LOCAL_URL}/api/routines`);
-    if (!res.ok) {
-      console.error(`  ⚠ Could not list routines: HTTP ${res.status}`);
-      return;
-    }
-    routines = await res.json();
+    if (res.ok) routines = await res.json();
+    else console.error(`  ⚠ Could not list routines: HTTP ${res.status}`);
   } catch (err) {
-    console.error("  ⚠ Could not reach dev server:", err.message);
+    console.error("  ⚠ Could not reach dev server (routines):", err.message);
     return;
+  }
+
+  try {
+    const res = await fetch(`${LOCAL_URL}/api/agents/schedules`);
+    if (res.ok) agentSchedules = await res.json();
+    else console.error(`  ⚠ Could not list agent schedules: HTTP ${res.status}`);
+  } catch (err) {
+    // Non-fatal — routines can still run even if agent endpoint is missing.
+    console.error("  ⚠ Could not fetch agent schedules:", err.message);
   }
 
   await writeHeartbeat();
 
-  const scheduled = routines.filter((r) => r.cron_schedule && r.cron_schedule.trim());
   const seen = new Set();
 
-  for (const routine of scheduled) {
-    const schedule = routine.cron_schedule.trim();
-    seen.add(routine.id);
+  // Routines
+  for (const routine of routines) {
+    const schedule = routine.cron_schedule?.trim();
+    if (!schedule) continue;
+    const key = `routine:${routine.id}`;
+    const label = `routine ${routine.name}`;
+    seen.add(key);
 
     if (!cron.validate(schedule)) {
-      console.error(`  ⚠ [${routine.name}] invalid cron expression: "${schedule}"`);
-      const existing = active.get(routine.id);
+      console.error(`  ⚠ [${label}] invalid cron expression: "${schedule}"`);
+      const existing = active.get(key);
       if (existing) {
         existing.task.stop();
-        active.delete(routine.id);
+        active.delete(key);
       }
       continue;
     }
 
-    const existing = active.get(routine.id);
+    const existing = active.get(key);
     if (existing && existing.schedule === schedule) continue;
     if (existing) existing.task.stop();
 
     const task = cron.schedule(schedule, () => fireRoutine(routine));
-    active.set(routine.id, { schedule, task });
-    console.log(`  + [${routine.name}] scheduled (${schedule})`);
+    active.set(key, { schedule, task, label });
+    console.log(`  + [${label}] scheduled (${schedule})`);
   }
 
-  // Remove tasks for routines that no longer have a schedule or were deleted.
-  for (const [id, entry] of active) {
-    if (!seen.has(id)) {
+  // Agent schedules
+  for (const entry of agentSchedules) {
+    const schedule = entry.cron_schedule?.trim();
+    if (!schedule) continue;
+    const key = `agent:${entry.agent_id}`;
+    const label = `agent ${entry.agent_name || entry.agent_id}`;
+    seen.add(key);
+
+    if (!cron.validate(schedule)) {
+      console.error(`  ⚠ [${label}] invalid cron expression: "${schedule}"`);
+      const existing = active.get(key);
+      if (existing) {
+        existing.task.stop();
+        active.delete(key);
+      }
+      continue;
+    }
+
+    const existing = active.get(key);
+    if (existing && existing.schedule === schedule) continue;
+    if (existing) existing.task.stop();
+
+    const task = cron.schedule(schedule, () => fireAgent(entry));
+    active.set(key, { schedule, task, label });
+    console.log(`  + [${label}] scheduled (${schedule})`);
+  }
+
+  // Unschedule anything that's no longer in the two source lists.
+  for (const [key, entry] of active) {
+    if (!seen.has(key)) {
       entry.task.stop();
-      active.delete(id);
-      console.log(`  - routine ${id} unscheduled`);
+      active.delete(key);
+      console.log(`  - [${entry.label}] unscheduled`);
     }
   }
 }

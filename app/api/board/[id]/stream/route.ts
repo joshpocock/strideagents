@@ -47,8 +47,11 @@ export async function GET(
     async start(controller) {
       const encoder = new TextEncoder();
 
-      function sendEvent(event: string, data: unknown) {
-        const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+      // Emit SSE frames WITHOUT named `event:` prefixes so the browser's
+      // EventSource.onmessage handler picks them up. The event type is
+      // already carried inside the JSON payload (data.type).
+      function sendEvent(eventName: string, data: unknown) {
+        const payload = `data: ${JSON.stringify({ ...(data as object), type: (data as any)?.type ?? eventName })}\n\n`;
         controller.enqueue(encoder.encode(payload));
       }
 

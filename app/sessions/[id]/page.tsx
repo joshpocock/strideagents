@@ -952,10 +952,33 @@ export default function SessionReplayPage() {
             style={{
               fontSize: 12,
               color: "var(--text-muted)",
+              wordBreak: "break-all",
+              overflowWrap: "anywhere",
+              minWidth: 0,
             }}
           >
             {sessionId.substring(0, 24)}...
           </code>
+
+          {/* Continue this session in Chat — parity with the Task Board */}
+          {session?.agent_id && !session?.archived_at && (
+            <Link
+              href={`/chat?session=${sessionId}&agent=${session.agent_id}`}
+              className="btn-secondary"
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                textDecoration: "none",
+              }}
+              title="Open this session in the chat UI"
+            >
+              <MessageSquare size={13} />
+              Continue in Chat
+            </Link>
+          )}
 
           {/* Actions dropdown */}
           <div style={{ position: "relative" }}>
@@ -1716,6 +1739,9 @@ function EventDetail({ event }: { event: ReplayEvent }) {
                   borderRadius: 6,
                   color: config.color,
                   display: "inline-block",
+                  maxWidth: "100%",
+                  wordBreak: "break-all",
+                  overflowWrap: "anywhere",
                 }}
               >
                 {(event.detail.content_block as Record<string, unknown>)
@@ -1749,11 +1775,13 @@ function EventDetail({ event }: { event: ReplayEvent }) {
             border: "1px solid var(--border-color)",
             borderRadius: 8,
             padding: 16,
-            overflowX: "auto",
             lineHeight: 1.5,
             color: "var(--text-secondary)",
             maxHeight: 400,
             overflowY: "auto",
+            overflowX: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
           }}
         >
           {JSON.stringify(event.detail, null, 2)}

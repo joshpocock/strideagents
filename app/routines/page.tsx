@@ -48,6 +48,24 @@ interface UpcomingRun {
   at: string;
 }
 
+interface UpcomingAgentRun {
+  agent_id: string;
+  agent_name: string;
+  at: string;
+}
+
+interface AgentRunRow {
+  id: number;
+  agent_id: string;
+  agent_name: string | null;
+  status: "success" | "error";
+  session_id: string | null;
+  session_url: string | null;
+  trigger_source: string | null;
+  error: string | null;
+  fired_at: string;
+}
+
 function trimError(err: string | null): string {
   if (!err) return "failed";
   // Most errors look like "401: {"type":"error","error":{"message":"..."}}"
@@ -172,6 +190,8 @@ export default function RoutinesPage() {
   const [dailyLimit] = useState(15);
   const [runs, setRuns] = useState<RoutineRun[]>([]);
   const [upcoming, setUpcoming] = useState<UpcomingRun[]>([]);
+  const [agentUpcoming, setAgentUpcoming] = useState<UpcomingAgentRun[]>([]);
+  const [agentRuns, setAgentRuns] = useState<AgentRunRow[]>([]);
   const [schedulerStatus, setSchedulerStatus] = useState<{
     connected: boolean;
     heartbeat_at: string | null;
@@ -193,6 +213,18 @@ export default function RoutinesPage() {
       .then((r) => (r.ok ? r.json() : {}))
       .then((data: { runs?: UpcomingRun[] }) => {
         if (Array.isArray(data.runs)) setUpcoming(data.runs);
+      })
+      .catch(() => {});
+    fetch("/api/agents/upcoming?days=7")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: { runs?: UpcomingAgentRun[] }) => {
+        if (Array.isArray(data.runs)) setAgentUpcoming(data.runs);
+      })
+      .catch(() => {});
+    fetch("/api/agents/runs?limit=200")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((data: { runs?: AgentRunRow[] }) => {
+        if (Array.isArray(data.runs)) setAgentRuns(data.runs);
       })
       .catch(() => {});
   };
@@ -444,7 +476,13 @@ export default function RoutinesPage() {
       </div>
 
       {tab === "calendar" && (
-        <RoutineCalendar runs={runs} routines={routines} upcoming={upcoming} />
+        <RoutineCalendar
+          runs={runs}
+          routines={routines}
+          upcoming={upcoming}
+          agentRuns={agentRuns}
+          agentUpcoming={agentUpcoming}
+        />
       )}
 
       {tab === "all" && (
@@ -1005,14 +1043,41 @@ export default function RoutinesPage() {
 
           {/* Schedule */}
           <div>
-            <label style={modalLabelStyle}>Schedule (optional)</label>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+                marginBottom: 6,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={formData.cron_schedule !== null}
+                onChange={(e) =>
+                  setFormData((p) => ({
+                    ...p,
+                    cron_schedule: e.target.checked ? "0 9 * * *" : null,
+                  }))
+                }
+              />
+              Run on a schedule
+            </label>
             <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 8px" }}>
-              If set, the local scheduler worker (<code>npm run dev:scheduler</code>) will fire this routine on a cron.
+              {formData.cron_schedule === null
+                ? "Leave unchecked to fire this routine manually or via API only."
+                : "The local scheduler worker (npm run dev:scheduler) will fire this routine on a cron."}
             </p>
-            <ScheduleBuilder
-              value={formData.cron_schedule}
-              onChange={(cron) => setFormData((p) => ({ ...p, cron_schedule: cron }))}
-            />
+            {formData.cron_schedule !== null && (
+              <ScheduleBuilder
+                value={formData.cron_schedule}
+                onChange={(cron) => setFormData((p) => ({ ...p, cron_schedule: cron }))}
+              />
+            )}
           </div>
 
           {/* Actions */}
@@ -1136,13 +1201,38 @@ export default function RoutinesPage() {
             </select>
           </div>
           <div>
-            <label style={modalLabelStyle}>Schedule (optional)</label>
-            <ScheduleBuilder
-              value={editData.cron_schedule}
-              onChange={(cron) =>
-                setEditData((p) => ({ ...p, cron_schedule: cron }))
-              }
-            />
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+                marginBottom: 6,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={editData.cron_schedule !== null}
+                onChange={(e) =>
+                  setEditData((p) => ({
+                    ...p,
+                    cron_schedule: e.target.checked ? "0 9 * * *" : null,
+                  }))
+                }
+              />
+              Run on a schedule
+            </label>
+            {editData.cron_schedule !== null && (
+              <ScheduleBuilder
+                value={editData.cron_schedule}
+                onChange={(cron) =>
+                  setEditData((p) => ({ ...p, cron_schedule: cron }))
+                }
+              />
+            )}
           </div>
           <div
             style={{
@@ -1212,10 +1302,14 @@ function RoutineCalendar({
   runs,
   routines,
   upcoming,
+  agentRuns,
+  agentUpcoming,
 }: {
   runs: RoutineRun[];
   routines: Routine[];
   upcoming: UpcomingRun[];
+  agentRuns: AgentRunRow[];
+  agentUpcoming: UpcomingAgentRun[];
 }) {
   const today = new Date();
   const days: Date[] = [];
@@ -1240,10 +1334,22 @@ function RoutineCalendar({
     return upcoming.filter((u) => localDateKey(new Date(u.at)) === key);
   };
 
+  const agentRunsForDate = (date: Date) => {
+    const key = localDateKey(date);
+    return agentRuns.filter((r) => localDateKey(new Date(r.fired_at)) === key);
+  };
+
+  const agentUpcomingForDate = (date: Date) => {
+    const key = localDateKey(date);
+    return agentUpcoming.filter((u) => localDateKey(new Date(u.at)) === key);
+  };
+
   const [selectedDay, setSelectedDay] = useState(0);
   const selectedDate = days[selectedDay];
   const selectedRuns = runsForDate(selectedDate);
   const selectedUpcoming = upcomingForDate(selectedDate);
+  const selectedAgentRuns = agentRunsForDate(selectedDate);
+  const selectedAgentUpcoming = agentUpcomingForDate(selectedDate);
 
   const isToday = (d: Date) =>
     d.toDateString() === today.toDateString();
@@ -1262,8 +1368,8 @@ function RoutineCalendar({
       >
         {days.map((d, i) => {
           const active = i === selectedDay;
-          const runCount = runsForDate(d).length;
-          const upcomingCount = upcomingForDate(d).length;
+          const runCount = runsForDate(d).length + agentRunsForDate(d).length;
+          const upcomingCount = upcomingForDate(d).length + agentUpcomingForDate(d).length;
           return (
             <button
               key={i}
@@ -1388,9 +1494,12 @@ function RoutineCalendar({
           </h3>
         </div>
 
-        {selectedRuns.length === 0 && selectedUpcoming.length === 0 ? (
+        {selectedRuns.length === 0 &&
+        selectedUpcoming.length === 0 &&
+        selectedAgentRuns.length === 0 &&
+        selectedAgentUpcoming.length === 0 ? (
           <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
-            No routines ran or scheduled on this day.
+            Nothing ran or scheduled on this day.
           </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1497,6 +1606,136 @@ function RoutineCalendar({
                       }}
                     >
                       Scheduled
+                    </span>
+                  </div>
+                  <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                    {new Date(u.at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              ))}
+
+            {/* Agent runs (historical) */}
+            {selectedAgentRuns.map((run) => (
+              <div
+                key={`agent-run-${run.id}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 12px",
+                  background: "var(--bg-input)",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  borderLeft: "3px solid var(--accent)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background:
+                        run.status === "success"
+                          ? "var(--success)"
+                          : "var(--error)",
+                    }}
+                  />
+                  <span style={{ fontWeight: 500 }}>
+                    {run.agent_name || run.agent_id}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: "var(--accent-subtle)",
+                      color: "var(--accent)",
+                    }}
+                  >
+                    Agent · Ran
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    color: "var(--text-muted)",
+                    fontSize: 12,
+                  }}
+                >
+                  {run.error && (
+                    <span
+                      style={{
+                        color: "var(--error)",
+                        maxWidth: 200,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={run.error}
+                    >
+                      {run.error}
+                    </span>
+                  )}
+                  {run.session_url && (
+                    <a
+                      href={run.session_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "var(--accent)", textDecoration: "none" }}
+                    >
+                      View session
+                    </a>
+                  )}
+                  <span>
+                    {new Date(run.fired_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              </div>
+            ))}
+
+            {/* Agent upcoming */}
+            {!isPast(selectedDate) &&
+              selectedAgentUpcoming.map((u, idx) => (
+                <div
+                  key={`agent-up-${u.agent_id}-${idx}`}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 12px",
+                    background: "var(--bg-input)",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    border: "1px dashed var(--accent-muted)",
+                    borderLeft: "3px solid var(--accent)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Clock size={14} color="var(--accent)" />
+                    <span style={{ fontWeight: 500 }}>{u.agent_name}</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        background: "var(--accent-subtle)",
+                        color: "var(--accent)",
+                      }}
+                    >
+                      Agent · Scheduled
                     </span>
                   </div>
                   <span style={{ color: "var(--text-muted)", fontSize: 12 }}>

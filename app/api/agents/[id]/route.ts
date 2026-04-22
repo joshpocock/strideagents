@@ -50,7 +50,9 @@ export async function PATCH(
 
 /**
  * DELETE /api/agents/:id
- * Archive (delete) an agent.
+ * Archive the agent. Anthropic's Managed Agents API soft-deletes via `archive`
+ * (not `delete`); archived agents stop appearing in the default list but can
+ * still be referenced by existing sessions.
  */
 export async function DELETE(
   _request: Request,
@@ -59,8 +61,7 @@ export async function DELETE(
   try {
     const { id } = await params;
     const client = getClient();
-    // @ts-expect-error - delete may not be in current SDK type defs
-    const result = await client.beta.agents.delete(id);
+    const result = await (client.beta as any).agents.archive(id);
     return NextResponse.json(result);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to delete agent";

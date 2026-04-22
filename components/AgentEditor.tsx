@@ -15,7 +15,7 @@ import { getModelId } from "@/lib/types";
  * shows the current state.
  */
 
-type PermissionPolicyType = "always_allow" | "require_confirmation";
+type PermissionPolicyType = "always_allow" | "always_ask";
 type ModelSpeed = "standard" | "fast";
 
 export interface ToolPermissionPolicy {
@@ -37,9 +37,37 @@ export interface ToolConfig {
   configs?: ToolSubConfig[];
 }
 
+// Matches the shape Anthropic's Agents API expects.
 export interface SkillRef {
-  id: string;
-  type?: "skill";
+  type: "anthropic" | "custom";
+  skill_id: string;
+  version?: string;
+}
+
+/**
+ * Normalize whatever shape comes back from the API or legacy storage into
+ * SkillRef. Handles three cases:
+ *   - Already-correct { type: "anthropic"|"custom", skill_id }
+ *   - Legacy broken shape { id, type: "skill" } — infer type from the id
+ *   - YAML/JSON hand-written shapes missing the `type` field
+ */
+function normalizeSkillRef(raw: unknown): SkillRef | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const id = (r.skill_id as string) ?? (r.id as string);
+  if (!id || typeof id !== "string") return null;
+
+  let type: "anthropic" | "custom";
+  if (r.type === "anthropic" || r.type === "custom") {
+    type = r.type;
+  } else {
+    // Legacy / unknown — guess from the id prefix so at least something saves.
+    type = id.startsWith("anthropic-") ? "anthropic" : "custom";
+  }
+
+  const out: SkillRef = { type, skill_id: id };
+  if (typeof r.version === "string") out.version = r.version;
+  return out;
 }
 
 export interface AgentConfig {
@@ -57,6 +85,11 @@ interface AgentEditorProps {
   initialData?: Partial<Agent>;
   onSubmit: (config: AgentConfig) => Promise<void>;
   submitLabel?: string;
+  /**
+   * When editing an existing agent, pass its id so the "Add from vault"
+   * dropdown can auto-attach the vault on click. Omit for new-agent flows.
+   */
+  agentId?: string;
 }
 
 interface SkillOption {
@@ -118,14 +151,37 @@ function agentToConfig(agent?: Partial<Agent>): AgentConfig {
       configs: [],
     });
   }
+  const rawSkills = (agent as { skills?: unknown[] })?.skills ?? [];
+  const skills = rawSkills
+    .map(normalizeSkillRef)
+    .filter((s): s is SkillRef => s !== null);
+
+  // Surface each mcp_toolset's default_config.permission_policy on the
+  // matching mcp_server so the UI can show a per-MCP permission dropdown.
+  // This is UI-local state — pruneConfig writes it back onto the toolset
+  // when serializing.
+  const mcpToolsetPolicy: Record<string, string> = {};
+  for (const t of (agent?.tools ?? []) as any[]) {
+    if (t?.type === "mcp_toolset" && t?.mcp_server_name) {
+      const p = t?.default_config?.permission_policy?.type;
+      if (p) mcpToolsetPolicy[t.mcp_server_name] = p;
+    }
+  }
+  const mcpServers = (agent?.mcp_servers ?? []).map((s: any) => {
+    const policy = s?.name ? mcpToolsetPolicy[s.name] : undefined;
+    return policy
+      ? { ...s, permission_policy: { type: policy } }
+      : s;
+  });
+
   return {
     name: agent?.name || "",
     description: agent?.description,
     model: { id: modelId, speed: speed ?? "standard" },
     system: agent?.system,
     tools,
-    mcp_servers: agent?.mcp_servers ?? [],
-    skills: [],
+    mcp_servers: mcpServers,
+    skills,
     metadata: {},
   };
 }
@@ -144,7 +200,13 @@ function pruneConfig(config: AgentConfig): AgentConfig {
   const validServerNames = new Set(validServers.map((s) => s.name).filter(Boolean));
 
   if (validServers.length > 0) {
-    out.mcp_servers = validServers;
+    // Strip UI-only fields (permission_policy is carried here for the form UI
+    // but Anthropic only accepts it on mcp_toolset entries). Default `type`
+    // to "url" because the API requires it and templates sometimes omit it.
+    out.mcp_servers = validServers.map((s) => {
+      const { permission_policy: _drop, ...rest } = s as any;
+      return { type: "url", ...rest };
+    });
   }
 
   // Sync tools: remove mcp_toolset entries for removed servers,
@@ -158,22 +220,60 @@ function pruneConfig(config: AgentConfig): AgentConfig {
       return true;
     });
 
-    // Add mcp_toolset for any server that doesn't have one
+    // Add mcp_toolset for any server that doesn't have one. Default new
+    // toolsets to always_allow so MCP tool calls don't stall waiting for
+    // human confirmation — users can tighten this per-MCP via the dropdown
+    // on each MCP row (see the UI section below).
     const existingToolsetNames = new Set(
       tools.filter((t: any) => t.type === "mcp_toolset").map((t: any) => t.mcp_server_name)
     );
     for (const server of validServers) {
       if (server.name && !existingToolsetNames.has(server.name)) {
-        tools.push({ type: "mcp_toolset", mcp_server_name: server.name } as any);
+        tools.push({
+          type: "mcp_toolset",
+          mcp_server_name: server.name,
+          default_config: {
+            enabled: true,
+            permission_policy: {
+              type: (server as any).permission_policy?.type ?? "always_allow",
+            },
+          },
+        } as any);
       }
     }
 
-    if (tools.length > 0) out.tools = tools;
+    // For existing mcp_toolset entries whose matching server has a
+    // permission_policy set in the UI, sync the toolset to match.
+    const updatedTools = tools.map((t: any) => {
+      if (t.type !== "mcp_toolset") return t;
+      const server = validServers.find((s: any) => s.name === t.mcp_server_name) as any;
+      const policy = server?.permission_policy?.type;
+      if (!policy) return t;
+      return {
+        ...t,
+        default_config: {
+          ...(t.default_config ?? { enabled: true }),
+          permission_policy: { type: policy },
+        },
+      };
+    });
+
+    if (updatedTools.length > 0) out.tools = updatedTools;
   } else if (validServers.length > 0) {
-    // No tools yet but we have servers - create toolset entries
+    // No tools yet but we have servers — create toolset entries defaulting
+    // to always_allow. Users can tighten per-MCP in the form UI.
     out.tools = validServers
       .filter((s) => s.name)
-      .map((s) => ({ type: "mcp_toolset", mcp_server_name: s.name } as any));
+      .map((s) => ({
+        type: "mcp_toolset",
+        mcp_server_name: s.name,
+        default_config: {
+          enabled: true,
+          permission_policy: {
+            type: (s as any).permission_policy?.type ?? "always_allow",
+          },
+        },
+      } as any));
   }
 
   if (config.skills && config.skills.length > 0) out.skills = config.skills;
@@ -214,7 +314,9 @@ function normalizeParsed(raw: unknown): AgentConfig {
     system: obj.system as string | undefined,
     tools: (obj.tools as ToolConfig[] | undefined) ?? [],
     mcp_servers: (obj.mcp_servers as McpServer[] | undefined) ?? [],
-    skills: (obj.skills as SkillRef[] | undefined) ?? [],
+    skills: ((obj.skills as unknown[] | undefined) ?? [])
+      .map(normalizeSkillRef)
+      .filter((s): s is SkillRef => s !== null),
     metadata: (obj.metadata as Record<string, string> | undefined) ?? {},
   };
 }
@@ -225,6 +327,7 @@ export default function AgentEditor({
   initialData,
   onSubmit,
   submitLabel = "Save",
+  agentId,
 }: AgentEditorProps) {
   const [config, setConfig] = useState<AgentConfig>(() =>
     agentToConfig(initialData)
@@ -342,7 +445,7 @@ export default function AgentEditor({
       </div>
 
       {tab === "form" && (
-        <FormView config={config} onChange={setConfig} />
+        <FormView config={config} onChange={setConfig} agentId={agentId} />
       )}
 
       {tab === "yaml" && (
@@ -480,12 +583,24 @@ function CodeView({
 function FormView({
   config,
   onChange,
+  agentId,
 }: {
   config: AgentConfig;
   onChange: (next: AgentConfig) => void;
+  agentId?: string;
 }) {
   const [models, setModels] = useState(fallbackModels);
   const [availableSkills, setAvailableSkills] = useState<SkillOption[]>([]);
+  const [mcpCreds, setMcpCreds] = useState<
+    Array<{
+      vault_id: string;
+      vault_name: string | null;
+      credential_id: string;
+      display_name: string;
+      mcp_url: string;
+    }>
+  >([]);
+  const [mcpHint, setMcpHint] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/models")
@@ -502,17 +617,33 @@ function FormView({
       })
       .catch(() => {});
 
+    fetch("/api/vaults/mcp-credentials")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) setMcpCreds(data);
+      })
+      .catch(() => {});
+
     fetch("/api/skills")
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
         if (Array.isArray(data)) {
+          // Only skills with source "anthropic" (Anthropic's registry) or
+          // "custom" (uploaded to the Skills API) can actually be attached to
+          // an agent. Bundled/github-fetched skills have to be uploaded first
+          // from the Skills page — showing them here would only produce 400s.
           setAvailableSkills(
-            data.map((s: SkillOption) => ({
-              id: s.id,
-              name: s.name,
-              description: s.description,
-              source: s.source,
-            }))
+            data
+              .filter(
+                (s: SkillOption) =>
+                  s.source === "anthropic" || s.source === "custom"
+              )
+              .map((s: SkillOption) => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                source: s.source,
+              }))
           );
         }
       })
@@ -595,15 +726,28 @@ function FormView({
 
   // Skills helpers
   const selectedSkillIds = useMemo(
-    () => new Set((config.skills ?? []).map((s) => s.id)),
+    () => new Set((config.skills ?? []).map((s) => s.skill_id)),
     [config.skills]
   );
   const toggleSkill = (id: string) => {
-    const next = new Set(selectedSkillIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    const existing = config.skills ?? [];
+    if (selectedSkillIds.has(id)) {
+      patch({ skills: existing.filter((s) => s.skill_id !== id) });
+      return;
+    }
+    const option = availableSkills.find((s) => s.id === id);
+    // Only "anthropic" (registered) and "custom" (uploaded) are valid Anthropic
+    // API skill types. Bundled or github-fetched skills must be uploaded first
+    // — filtered out of availableSkills below, so this branch shouldn't hit in
+    // normal use, but guard anyway.
+    if (!option || (option.source !== "anthropic" && option.source !== "custom")) {
+      return;
+    }
     patch({
-      skills: Array.from(next).map((sid) => ({ id: sid, type: "skill" })),
+      skills: [
+        ...existing,
+        { type: option.source as "anthropic" | "custom", skill_id: id },
+      ],
     });
   };
 
@@ -787,7 +931,7 @@ function FormView({
                   }
                 >
                   <option value="always_allow">Always allow</option>
-                  <option value="require_confirmation">Require confirmation</option>
+                  <option value="always_ask">Require confirmation</option>
                 </select>
               </div>
             </div>
@@ -869,7 +1013,7 @@ function FormView({
                       >
                         <option value="inherit">Inherit permission</option>
                         <option value="always_allow">Always allow</option>
-                        <option value="require_confirmation">
+                        <option value="always_ask">
                           Require confirmation
                         </option>
                       </select>
@@ -996,6 +1140,25 @@ function FormView({
               onChange={(e) => updateMcp(i, "url", e.target.value)}
               placeholder="https://mcp-server-url.example.com"
             />
+            <select
+              value={(server as any).permission_policy?.type ?? "always_allow"}
+              onChange={(e) => {
+                const policy = e.target.value as PermissionPolicyType;
+                onChange({
+                  ...config,
+                  mcp_servers: (config.mcp_servers ?? []).map((s, idx) =>
+                    idx === i
+                      ? ({ ...s, permission_policy: { type: policy } } as any)
+                      : s
+                  ),
+                });
+              }}
+              title="Per-tool permission policy for this MCP. always_allow fires tools without waiting for human approval."
+              style={{ width: 180 }}
+            >
+              <option value="always_allow">Always allow tools</option>
+              <option value="always_ask">Require confirmation</option>
+            </select>
             <button
               type="button"
               onClick={() => removeMcp(i)}
@@ -1010,20 +1173,104 @@ function FormView({
             </button>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={addMcp}
-          className="btn-secondary"
-          style={{
-            padding: "8px 16px",
-            fontSize: 13,
-            borderStyle: "dashed",
-            gap: 6,
-          }}
-        >
-          <Plus size={14} />
-          Add MCP Server
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={addMcp}
+            className="btn-secondary"
+            style={{
+              padding: "8px 16px",
+              fontSize: 13,
+              borderStyle: "dashed",
+              gap: 6,
+            }}
+          >
+            <Plus size={14} />
+            Add MCP Server
+          </button>
+          {mcpCreds.length > 0 && (
+            <>
+              <span style={{ color: "var(--text-muted)", fontSize: 12 }}>or</span>
+              <select
+                value=""
+                onChange={async (e) => {
+                  const credId = e.target.value;
+                  if (!credId) return;
+                  const cred = mcpCreds.find((c) => c.credential_id === credId);
+                  if (!cred) return;
+
+                  // Fill the MCP row on the agent config.
+                  const already = (config.mcp_servers ?? []).some(
+                    (s) => s.url === cred.mcp_url
+                  );
+                  if (!already) {
+                    onChange({
+                      ...config,
+                      mcp_servers: [
+                        ...(config.mcp_servers ?? []),
+                        { name: cred.display_name, url: cred.mcp_url },
+                      ],
+                    });
+                  }
+
+                  // If we're editing an existing agent, attach the vault too
+                  // so its credentials flow into future sessions.
+                  if (agentId) {
+                    try {
+                      await fetch(`/api/agents/${agentId}/vaults`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ vault_id: cred.vault_id }),
+                      });
+                      setMcpHint(
+                        `Added "${cred.display_name}" and attached vault ${cred.vault_name ?? cred.vault_id}.`
+                      );
+                    } catch {
+                      setMcpHint(
+                        `Added "${cred.display_name}". Vault attachment failed — attach it manually in Runtime defaults.`
+                      );
+                    }
+                  } else {
+                    setMcpHint(
+                      `Added "${cred.display_name}". Attach the vault in Runtime defaults after saving.`
+                    );
+                  }
+                  e.target.value = "";
+                }}
+                style={{
+                  padding: "8px 12px",
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 6,
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                }}
+              >
+                <option value="">Add from vault…</option>
+                {mcpCreds.map((c) => (
+                  <option key={c.credential_id} value={c.credential_id}>
+                    {c.display_name}
+                    {c.vault_name ? ` · ${c.vault_name}` : ""}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+        {mcpHint && (
+          <p
+            style={{
+              fontSize: 12,
+              color: "var(--text-muted)",
+              marginTop: 8,
+              padding: "6px 10px",
+              background: "var(--bg-card)",
+              borderRadius: 6,
+            }}
+          >
+            {mcpHint}
+          </p>
+        )}
       </div>
 
       {/* Metadata */}
